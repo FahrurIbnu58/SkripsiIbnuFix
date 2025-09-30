@@ -58,7 +58,7 @@ if selected == "Description":
     st.dataframe(df)
     # Jumlah data otomatis setelah tabel
     total_rows = df.shape
-    st.caption(f"📊 Dataset sebanyak **{total_rows} data ** .")
+    st.caption(f"📊 Dataset sebanyak = {total_rows} data .")
 
     # Deskripsi dataset
     st.markdown("### 📌 Informasi Dataset")
@@ -534,6 +534,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
