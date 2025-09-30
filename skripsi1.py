@@ -388,8 +388,8 @@ if selected == "Implementation":
             st.text_input("Lama Usaha (otomatis)", value=str(lama_usaha), disabled=True)
 
             kemitraan = st.number_input("Kemitraan", min_value=0)
-            aset = st.number_input("Aset (jutaan)", min_value=0, format="Rp. %d")
-            omzet = st.number_input("Omzet (ribuan) per bulan", min_value=0, format="Rp. %d")
+            aset = st.number_input("Aset", min_value=0)
+            omzet = st.number_input("Omzet per bulan", min_value=0)
             jml_naker = st.number_input("Jumlah Tenaga Kerja", min_value=0)
             izin = st.selectbox("Surat Izin", ("", "tidak memiliki", "proses pengurusan", "SIUP"))  # kosong sebagai default
             submit_pred = st.form_submit_button("Prediksi Cluster")
@@ -507,4 +507,5 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
