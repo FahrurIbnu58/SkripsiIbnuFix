@@ -47,22 +47,43 @@ def entropy_weighting(data):
     return weights
 
 # -------------------------
+
 # Description
 # -------------------------
 if selected == "Description":
     st.markdown("<h1 style='text-align: center;'>DESKRIPSI DATASET</h1>", unsafe_allow_html=True)
-    st.write("###### Dataset yang digunakan adalah dataset UMKM Batik Kabupaten Bangkaln, dapat dilihat pada tabel dibawah ini:")
+
+    # Load dataset
     df = pd.read_csv('DATA BATIK DINAS UMKM 1.csv')
     st.dataframe(df)
 
     # Jumlah data
     total_rows, total_cols = df.shape
-    st.write(f"Jumlah data: **{total_rows} baris** dan **{total_cols} kolom**")
 
-    st.write("###### Sumber Dataset : Dinas Usaha UMKM Kabupaten Bangkalan")
-    st.write("Dataset ini berisi informasi tentang UMKM batik yang berada di Kabupaten Bangkalan")
+    # Deskripsi dataset
+    st.markdown("### 📌 Informasi Dataset")
+    st.write(f"""
+    Dataset yang digunakan merupakan data **UMKM Batik Kabupaten Bangkalan tahun 2025** 
+    yang diperoleh dari **Dinas Usaha UMKM Kabupaten Bangkalan**.  
+    Dataset ini memuat informasi mengenai profil usaha batik di wilayah Bangkalan.  
 
-    
+    **Jumlah data keseluruhan:**  
+    - {total_rows} baris (UMKM Batik)    
+
+    **Fitur-fitur dalam dataset antara lain:**  
+    - 🏭 **Nama Usaha** : Identitas nama UMKM batik  
+    - 📍 **Alamat** : Lokasi usaha batik  
+    - 📅 **Tahun Berdiri** : Tahun berdirinya usaha  
+    - ⏳ **Lama Usaha** : Lama usaha berjalan hingga tahun sekarang 
+    - 🤝 **Kemitraan** : Jumlah kemitraan yang dimiliki  
+    - 💰 **Aset (jutaan)** : Total Nilai aset yang dimiliki oleh UMKM bisa berupa gedung, mesin, bahan produksi, alat untuk produksi dan lain-lain dalam satuan rupiah 
+    - 📈 **Omzet (ribuan/bulan)** : Total pendapatan UMKM perbulan dalam satuan rupiah 
+    - 👥 **Jumlah Tenaga Kerja** : Total pekerja pada UMKM  
+    - 📜 **Surat Izin** : Status kepemilikan izin usaha (misalnya tidak memiliki, proses pengurusan, atau sudah SIUP)  
+    """)
+
+    st.success("✅ Dataset siap digunakan untuk proses analisis dan clustering.")
+
 
 # -------------------------
 # Preprocessing
@@ -513,6 +534,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
