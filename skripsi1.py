@@ -68,7 +68,7 @@ if selected == "Description":
     Dataset ini memuat informasi mengenai profil usaha batik di wilayah Bangkalan.  
 
     **Jumlah data keseluruhan:**  
-    - {total_rows} baris (UMKM Batik)    
+    - {total_rows} (UMKM Batik)    
 
     **Fitur-fitur dalam dataset antara lain:**  
     - 🏭 **Nama Usaha** : Identitas nama UMKM batik  
@@ -534,6 +534,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
