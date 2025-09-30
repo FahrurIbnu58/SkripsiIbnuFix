@@ -20,7 +20,7 @@ from streamlit_option_menu import option_menu
 
 st.set_page_config(page_title='PERBANDINGAN METODE AHC DAN FCM UNTUK KLASTERISASI BATIK KABUPATEN BANGKALAN')
 st.write("---")
-st.markdown("<h1 style='text-align: center;'>PERBANDINGAN METODE AHC DAN FCM UNTUK KLASTERISASI BATIK KABUPATEN BANGKALAN</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>PERBANDINGAN METODE AHC DAN FCM UNTUK KLASTERISASI UMKM BATIK KABUPATEN BANGKALAN</h1>", unsafe_allow_html=True)
 st.write("---")
 
 selected = option_menu(
@@ -54,8 +54,14 @@ if selected == "Description":
     st.write("###### Dataset yang digunakan adalah dataset UMKM Batik Kabupaten Bangkaln, dapat dilihat pada tabel dibawah ini:")
     df = pd.read_csv('DATA BATIK DINAS UMKM 1.csv')
     st.dataframe(df)
+
+    # Jumlah data
+    total_rows, total_cols = df.shape
+    st.write(f"Jumlah data: **{total_rows} baris** dan **{total_cols} kolom**")
+
     st.write("###### Sumber Dataset : Dinas Usaha UMKM Kabupaten Bangkalan")
-    st.write(" Dataset ini berisi informasi tentang UMKM batik yang berada di Kabupaten Bangkalan")
+    st.write("Dataset ini berisi informasi tentang UMKM batik yang berada di Kabupaten Bangkalan")
+
     
 
 # -------------------------
@@ -507,6 +513,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
