@@ -56,9 +56,9 @@ if selected == "Description":
     # Load dataset
     df = pd.read_csv('DATA BATIK DINAS UMKM 1.csv')
     st.dataframe(df)
-
-    # Jumlah data
-    total_rows, total_cols = df.shape
+    # Jumlah data otomatis setelah tabel
+    total_rows = df.shape
+    st.caption(f"📊 Dataset sebanyak **{total_rows} data ** .")
 
     # Deskripsi dataset
     st.markdown("### 📌 Informasi Dataset")
@@ -534,6 +534,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
