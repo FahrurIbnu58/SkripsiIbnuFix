@@ -132,9 +132,6 @@ if selected == "Entropy Weighting":
     ax.set_yticks([])
     st.pyplot(fig)
 
-    st.write("---")
-    st.write("By Fahrurrohman Ibnu Irsad Argyanto")
-    st.write("© Copyright 2025.")
 
 # -------------------------
 # Clustering (skenario uji)
@@ -507,3 +504,4 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
