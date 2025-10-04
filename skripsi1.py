@@ -269,8 +269,8 @@ if selected == "Clustering":
 
     # Simpan df_entropy_weighted hanya sekali agar tidak berubah saat rerun
     if "df_entropy_weighted" not in st.session_state:
-    st.session_state["df_entropy_weighted"] = df_entropy_weighted.copy()
-    df_entropy_weighted = st.session_state["df_entropy_weighted"]
+        st.session_state["df_entropy_weighted"] = df_entropy_weighted.copy()
+        df_entropy_weighted = st.session_state["df_entropy_weighted"]
 
     # Ambil 5 fitur teratas dari ranking entropy
     k_feat = 5
@@ -595,6 +595,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
