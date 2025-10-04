@@ -263,90 +263,90 @@ if selected == "Clustering":
     st.info(f"Best K = {best_agg_k_weighted}, Silhouette = {best_agg_score_weighted:.4f}")
 
     # =====================================================
-# 4. FCM - Dengan Seleksi Fitur
-# =====================================================
-st.subheader("🔹 FCM - Dengan Seleksi Fitur (5 Fitur Teratas)")
+    # 4. FCM - Dengan Seleksi Fitur
+    # =====================================================
+    st.subheader("🔹 FCM - Dengan Seleksi Fitur (5 Fitur Teratas)")
 
-# Simpan df_entropy_weighted hanya sekali agar tidak berubah saat rerun
-if "df_entropy_weighted" not in st.session_state:
+    # Simpan df_entropy_weighted hanya sekali agar tidak berubah saat rerun
+    if "df_entropy_weighted" not in st.session_state:
     st.session_state["df_entropy_weighted"] = df_entropy_weighted.copy()
-df_entropy_weighted = st.session_state["df_entropy_weighted"]
+    df_entropy_weighted = st.session_state["df_entropy_weighted"]
 
-# Ambil 5 fitur teratas dari ranking entropy
-k_feat = 5
-selected_features = feature_ranking["Feature"].iloc[:k_feat].tolist()
-removed_features = feature_ranking["Feature"].iloc[k_feat:].tolist()
+    # Ambil 5 fitur teratas dari ranking entropy
+    k_feat = 5
+    selected_features = feature_ranking["Feature"].iloc[:k_feat].tolist()
+    removed_features = feature_ranking["Feature"].iloc[k_feat:].tolist()
 
-st.write(f"**Fitur digunakan:** {', '.join(selected_features)}")
-if removed_features:
-    st.write(f"**Fitur tidak digunakan:** {', '.join(removed_features)}")
+    st.write(f"**Fitur digunakan:** {', '.join(selected_features)}")
+    if removed_features:
+        st.write(f"**Fitur tidak digunakan:** {', '.join(removed_features)}")
 
-# Ambil data berdasarkan fitur terpilih
-X_sub = df_entropy_weighted[selected_features].values
-data_weighted_T = X_sub.T
+    # Ambil data berdasarkan fitur terpilih
+    X_sub = df_entropy_weighted[selected_features].values
+    data_weighted_T = X_sub.T
 
-# Hitung silhouette untuk tiap K
-scores_fcm_weighted = []
-range_n_clusters = range(2, 11)
+    # Hitung silhouette untuk tiap K
+    scores_fcm_weighted = []
+    range_n_clusters = range(2, 11)
 
-for k in range_n_clusters:
+    for k in range_n_clusters:
+        cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
+            data_weighted_T, c=k, m=2, error=0.005, maxiter=1000, init=None, seed=42
+        )
+        fcm_labels = np.argmax(u, axis=0)
+        sil_score = silhouette_score(X_sub, fcm_labels)
+        scores_fcm_weighted.append(sil_score)
+
+    # Tentukan K terbaik
+    best_fcm_score_weighted = max(scores_fcm_weighted)
+    best_fcm_k_weighted = range_n_clusters[scores_fcm_weighted.index(best_fcm_score_weighted)]
+
+    # === Plot hasil ===
+    fig4, ax4 = plt.subplots()
+    ax4.plot(range_n_clusters, scores_fcm_weighted, marker='o', color='purple')
+    ax4.set_title("FCM - Dengan Seleksi Fitur (5 Fitur Teratas)")
+    ax4.set_xlabel("Jumlah Cluster (k)")
+    ax4.set_ylabel("Silhouette Score")
+    ax4.axvline(best_fcm_k_weighted, color='r', linestyle='--', label=f"Best K = {best_fcm_k_weighted}")
+    ax4.legend()
+    ax4.grid(True, linestyle='--', alpha=0.5)
+    st.pyplot(fig4)
+
+    # === Tampilkan hasil tiap K ===
+    st.write("📊 **Hasil per K:**")
+    for k, score in zip(range_n_clusters, scores_fcm_weighted):
+        st.text(f"k = {k}, Silhouette = {score:.4f}")
+
+    # === Tampilkan K terbaik ===
+    st.info(f"✅ Best K = {best_fcm_k_weighted}, Silhouette = {best_fcm_score_weighted:.4f}")
+
+    # === Jalankan ulang FCM dengan K terbaik untuk ringkasan cluster ===
     cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-        data_weighted_T, c=k, m=2, error=0.005, maxiter=1000, init=None, seed=42
+        data_weighted_T, c=best_fcm_k_weighted, m=2, error=0.005, maxiter=1000, init=None, seed=42
     )
-    fcm_labels = np.argmax(u, axis=0)
-    sil_score = silhouette_score(X_sub, fcm_labels)
-    scores_fcm_weighted.append(sil_score)
+    best_labels = np.argmax(u, axis=0)
 
-# Tentukan K terbaik
-best_fcm_score_weighted = max(scores_fcm_weighted)
-best_fcm_k_weighted = range_n_clusters[scores_fcm_weighted.index(best_fcm_score_weighted)]
+    df_with_cluster = df[selected_features].copy()
+    df_with_cluster["Cluster"] = best_labels
 
-# === Plot hasil ===
-fig4, ax4 = plt.subplots()
-ax4.plot(range_n_clusters, scores_fcm_weighted, marker='o', color='purple')
-ax4.set_title("FCM - Dengan Seleksi Fitur (5 Fitur Teratas)")
-ax4.set_xlabel("Jumlah Cluster (k)")
-ax4.set_ylabel("Silhouette Score")
-ax4.axvline(best_fcm_k_weighted, color='r', linestyle='--', label=f"Best K = {best_fcm_k_weighted}")
-ax4.legend()
-ax4.grid(True, linestyle='--', alpha=0.5)
-st.pyplot(fig4)
+    # Tampilkan ringkasan cluster
+    num_features = [col for col in selected_features if col != "surat Izin"]
+    if num_features:
+        cluster_min = df_with_cluster.groupby("Cluster")[num_features].min()
+        cluster_max = df_with_cluster.groupby("Cluster")[num_features].max()
+        cluster_ranges = cluster_min.astype(str) + " – " + cluster_max.astype(str)
+        cluster_ranges = cluster_ranges.reset_index()
+    else:
+        cluster_ranges = pd.DataFrame({"Cluster": df_with_cluster["Cluster"].unique()})
 
-# === Tampilkan hasil tiap K ===
-st.write("📊 **Hasil per K:**")
-for k, score in zip(range_n_clusters, scores_fcm_weighted):
-    st.text(f"k = {k}, Silhouette = {score:.4f}")
+    if "surat Izin" in selected_features:
+        izin_dist = df_with_cluster.groupby(["Cluster", "surat Izin"]).size().unstack(fill_value=0).reset_index()
+        cluster_summary = pd.merge(cluster_ranges, izin_dist, on="Cluster", how="left")
+    else:
+        cluster_summary = cluster_ranges
 
-# === Tampilkan K terbaik ===
-st.info(f"✅ Best K = {best_fcm_k_weighted}, Silhouette = {best_fcm_score_weighted:.4f}")
-
-# === Jalankan ulang FCM dengan K terbaik untuk ringkasan cluster ===
-cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-    data_weighted_T, c=best_fcm_k_weighted, m=2, error=0.005, maxiter=1000, init=None, seed=42
-)
-best_labels = np.argmax(u, axis=0)
-
-df_with_cluster = df[selected_features].copy()
-df_with_cluster["Cluster"] = best_labels
-
-# Tampilkan ringkasan cluster
-num_features = [col for col in selected_features if col != "surat Izin"]
-if num_features:
-    cluster_min = df_with_cluster.groupby("Cluster")[num_features].min()
-    cluster_max = df_with_cluster.groupby("Cluster")[num_features].max()
-    cluster_ranges = cluster_min.astype(str) + " – " + cluster_max.astype(str)
-    cluster_ranges = cluster_ranges.reset_index()
-else:
-    cluster_ranges = pd.DataFrame({"Cluster": df_with_cluster["Cluster"].unique()})
-
-if "surat Izin" in selected_features:
-    izin_dist = df_with_cluster.groupby(["Cluster", "surat Izin"]).size().unstack(fill_value=0).reset_index()
-    cluster_summary = pd.merge(cluster_ranges, izin_dist, on="Cluster", how="left")
-else:
-    cluster_summary = cluster_ranges
-
-st.write("📋 **Ringkasan Tiap Cluster:**")
-st.dataframe(cluster_summary)
+    st.write("📋 **Ringkasan Tiap Cluster:**")
+    st.dataframe(cluster_summary)
 
 
     # =====================================================
@@ -595,6 +595,7 @@ if selected == "Implementation":
 st.write("---")
 st.write("By Fahrurrohman Ibnu Irsad Argyanto")
 st.write("© Copyright 2025.")
+
 
 
 
