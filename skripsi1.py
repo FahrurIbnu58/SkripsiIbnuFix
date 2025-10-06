@@ -256,6 +256,12 @@ if selected == "Clustering":
     with st.container():
         st.markdown("<div class='stCard'>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align:center;'>🔗 CLUSTERING: AHC vs FCM</h2>", unsafe_allow_html=True)
+        st.write(""" Pada tahap ini Dilakukan Skenario Uji :
+        1. AHC Tanpa Seleksi Fitur
+        2. FCM Tanpa Seleksi Fitur
+        3. AHC Dengan Seleksi Fitur
+        4. FCM Dengan Seleksi Fitur
+        """)
 
         # load & preprocessing
         df = pd.read_csv("DATA BATIK DINAS UMKM 1.csv")
@@ -689,6 +695,7 @@ st.markdown("""
     © 2025 — Klasterisasi UMKM Batik Bangkalan
 </div>
 """, unsafe_allow_html=True)
+
 
 
 
