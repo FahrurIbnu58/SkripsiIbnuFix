@@ -288,7 +288,7 @@ if selected == "Clustering":
             scores_agg_norm.append(silhouette_score(X_norm, agg_labels))
         best_agg_score_norm = max(scores_agg_norm)
         best_agg_k_norm = range_n_clusters[scores_agg_norm.index(best_agg_score_norm)]
-        fig1, ax1 = plt.subplots()
+        fig1, ax1 = plt.subplots(figsize=(5, 3))
         ax1.plot(range_n_clusters, scores_agg_norm, marker='o')
         ax1.set_title("AHC - Tanpa Seleksi Fitur")
         ax1.set_xlabel("Jumlah Cluster (k)")
@@ -314,7 +314,7 @@ if selected == "Clustering":
             scores_fcm_norm.append(silhouette_score(X_norm, fcm_labels))
         best_fcm_score_norm = max(scores_fcm_norm)
         best_fcm_k_norm = range_n_clusters[scores_fcm_norm.index(best_fcm_score_norm)]
-        fig2, ax2 = plt.subplots()
+        fig2, ax2 = plt.subplots(figsize=(5, 3))
         ax2.plot(range_n_clusters, scores_fcm_norm, marker='o', color='orange')
         ax2.set_title("FCM - Tanpa Seleksi Fitur")
         ax2.set_xlabel("Jumlah Cluster (k)")
@@ -338,7 +338,7 @@ if selected == "Clustering":
             scores_agg_weighted.append(silhouette_score(X_sub, agg_labels))
         best_agg_score_weighted = max(scores_agg_weighted)
         best_agg_k_weighted = range_n_clusters[scores_agg_weighted.index(best_agg_score_weighted)]
-        fig3, ax3 = plt.subplots()
+        fig3, ax3 = plt.subplots(figsize=(5, 3))
         ax3.plot(range_n_clusters, scores_agg_weighted, marker='o', color='green')
         ax3.set_title("AHC - Dengan Seleksi Fitur")
         ax3.set_xlabel("Jumlah Cluster (k)")
@@ -390,7 +390,7 @@ if selected == "Clustering":
         best_fcm_k_weighted = range_n_clusters[scores_fcm_weighted.index(best_fcm_score_weighted)]
 
         # === Plot hasil ===
-        fig4, ax4 = plt.subplots()
+        fig4, ax4 = plt.subplots(figsize=(5, 3))
         ax4.plot(range_n_clusters, scores_fcm_weighted, marker='o', color='purple')
         ax4.set_title("FCM - Dengan Seleksi Fitur (5 Fitur Teratas)")
         ax4.set_xlabel("Jumlah Cluster (k)")
@@ -463,7 +463,7 @@ if selected == "Clustering":
         })
         st.dataframe(df_results)
 
-        fig5, ax5 = plt.subplots(figsize=(10, 6))
+        fig5, ax5 = plt.subplots(figsize=(5, 3))
         methods = df_results["Skenario"]
         best_scores = df_results["Silhouette"]
         best_ks = df_results["Best K"]
@@ -689,5 +689,6 @@ st.markdown("""
     © 2025 — Klasterisasi UMKM Batik Bangkalan
 </div>
 """, unsafe_allow_html=True)
+
 
 
