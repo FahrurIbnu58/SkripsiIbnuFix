@@ -528,7 +528,7 @@ if selected == "Clustering":
         st.session_state["df_clustered"] = df_hasil
 
         # preview + download
-        st.dataframe(df_hasil.head)
+        st.dataframe(df_hasil)
 
         csv_hasil = df_hasil.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -689,4 +689,5 @@ st.markdown("""
     © 2025 — Klasterisasi UMKM Batik Bangkalan
 </div>
 """, unsafe_allow_html=True)
+
 
