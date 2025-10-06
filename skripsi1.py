@@ -412,7 +412,7 @@ if selected == "Clustering":
         cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
             data_weighted_T, c=best_fcm_k_weighted, m=2, error=0.005, maxiter=1000, init=None, seed=42
         )
-        best_labels = np.argmax(u, axis=0)
+        best_labels = np.argmax(u, axis=0) + 1
 
         df_with_cluster = df[selected_features].copy()
         df_with_cluster["Cluster"] = best_labels
@@ -528,7 +528,7 @@ if selected == "Clustering":
         st.session_state["df_clustered"] = df_hasil
 
         # preview + download
-        st.dataframe(df_hasil.head(15))
+        st.dataframe(df_hasil.head)
 
         csv_hasil = df_hasil.to_csv(index=False).encode("utf-8")
         st.download_button(
@@ -689,3 +689,4 @@ st.markdown("""
     © 2025 — Klasterisasi UMKM Batik Bangkalan
 </div>
 """, unsafe_allow_html=True)
+
