@@ -463,7 +463,7 @@ if selected == "Clustering":
         })
         st.dataframe(df_results)
 
-        fig5, ax5 = plt.subplots(figsize=(5, 3))
+        fig5, ax5 = plt.subplots(figsize=(10,6))
         methods = df_results["Skenario"]
         best_scores = df_results["Silhouette"]
         best_ks = df_results["Best K"]
