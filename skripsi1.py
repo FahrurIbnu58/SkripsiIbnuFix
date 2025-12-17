@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import altair as alt
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import silhouette_score, davies_bouldin_score
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 import missingno as msno
 from sklearn.preprocessing import LabelEncoder
 from sklearn.cluster import AgglomerativeClustering
@@ -29,16 +29,13 @@ st.markdown("""
         [data-testid="stAppViewContainer"] {
             background: linear-gradient(160deg, #f5f7fa 0%, #e4ebf5 100%);
         }
-
         h1 { color: #1f3c88 !important; font-weight: 700 !important; }
         h2, h3 { color: #1a237e !important; }
-
         hr {
             border: 1px solid #b0bec5 !important;
             margin-top: 10px;
             margin-bottom: 20px;
         }
-
         .stCard {
             background: #ffffff;
             padding: 1.5rem;
@@ -46,7 +43,6 @@ st.markdown("""
             box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
             margin-bottom: 25px;
         }
-
         div.stButton > button:first-child {
             background-color: #1f77b4;
             color: white;
@@ -60,7 +56,6 @@ st.markdown("""
             background-color: #105a8b;
             transform: translateY(-1px);
         }
-
         .stDownloadButton button {
             background: linear-gradient(90deg, #00b09b, #96c93d);
             color: white;
@@ -74,7 +69,6 @@ st.markdown("""
             opacity: 0.9;
             transform: translateY(-1px);
         }
-
         .footer {
             text-align: center;
             font-size: 0.85rem;
@@ -84,9 +78,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# -------------------------------------
-# Judul utama halaman
-# -------------------------------------
 st.markdown("""
 <h1 style='text-align: center; font-size: 30px;'>
 Perbandingan Metode Agglomerative Hierarchical Clustering (AHC) dan Fuzzy C-Means Clustering (FCM) Untuk Menentukan Klasterisasi UMKM Batik Di Kabupaten Bangkalan
@@ -132,9 +123,6 @@ def entropy_weighting(data):
     weights = (1 - entropy) / (n - entropy.sum())
     return weights
 
-# ======================================================
-# Helper plot (rapi, tidak nabrak)
-# ======================================================
 def plot_metric_curve(range_n_clusters, values, best_k, title, ylabel, color="blue"):
     fig, ax = plt.subplots(figsize=(6, 3.5))
     ax.plot(list(range_n_clusters), values, marker='o', color=color)
@@ -145,6 +133,15 @@ def plot_metric_curve(range_n_clusters, values, best_k, title, ylabel, color="bl
     ax.grid(True, linestyle='--', alpha=0.4)
     plt.tight_layout()
     return fig
+
+def safe_corr(a, b):
+    a = np.array(a, dtype=float)
+    b = np.array(b, dtype=float)
+    if len(a) < 3:
+        return 0.0
+    if np.isclose(np.std(a), 0.0) or np.isclose(np.std(b), 0.0):
+        return 0.0
+    return float(np.corrcoef(a, b)[0, 1])
 
 # ======================================================
 # Description Section
@@ -157,23 +154,6 @@ if selected == "Description":
         df = pd.read_csv('DATA BATIK DINAS UMKM 1.csv')
         st.dataframe(df, use_container_width=True)
         st.caption(f"📊 Dataset berisi {df.shape[0]} data UMKM Batik Kabupaten Bangkalan.")
-
-        st.write("""
-        Dataset yang digunakan merupakan data **UMKM Batik Kabupaten Bangkalan tahun 2025**
-        yang diperoleh dari **Dinas Usaha UMKM Kabupaten Bangkalan**.  
-        Dataset ini memuat informasi mengenai profil usaha batik di wilayah Bangkalan.
-
-        **Fitur-fitur dalam dataset antara lain:**
-        - 🏭 **Nama Usaha**
-        - 📍 **Alamat**
-        - 📅 **Tahun Berdiri**
-        - ⏳ **Lama Usaha**
-        - 🤝 **Kemitraan**
-        - 💰 **Aset (jutaan)**
-        - 📈 **Omzet (ribuan/bulan)**
-        - 👥 **Jumlah Tenaga Kerja**
-        - 📜 **Surat Izin**
-        """)
         st.success("✅ Dataset berhasil dimuat dan siap digunakan.")
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -189,34 +169,20 @@ if selected == "Preprocessing":
         st.write("### 🔍 Data Asli")
         st.dataframe(df.head(), use_container_width=True)
 
-        # Hapus kolom tidak relevan
         df_new = df.drop(['nama_usaha', 'alamat', 'tahun'], axis=1)
         st.subheader("Menghapus Kolom yang Tidak Relevan")
-        st.write("Kolom yang dihapus: `nama_usaha`, `alamat`, `tahun`")
         st.dataframe(df_new)
 
-        # Label encoding surat Izin
         st.subheader("Label Encoding Kolom 'surat Izin'")
         num = {"SIUP": 2, "proses pengurusan": 1, "tidak memiliki": 0}
-        mapping_df = pd.DataFrame(list(num.items()), columns=["Value Asli", "Encoding"])
-        st.dataframe(mapping_df)
         df_new['surat Izin'] = df_new['surat Izin'].map(num)
-        st.write("Sesudah Encoding:")
         st.dataframe(df_new)
 
-        # Normalisasi
         st.subheader("Normalisasi Data (0–1)")
         scaler_norm = MinMaxScaler()
         X_norm = scaler_norm.fit_transform(df_new)
         df_scaled = pd.DataFrame(X_norm, columns=df_new.columns)
-
-        df_compare = pd.concat(
-            [df_new.reset_index(drop=True), df_scaled],
-            axis=1,
-            keys=["Data Asli", "Data Normalisasi"]
-        )
-        st.write("Perbandingan Data Asli vs Data Normalisasi (rentang 0–1)")
-        st.dataframe(df_compare)
+        st.dataframe(df_scaled)
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -230,7 +196,6 @@ if selected == "Entropy Weighting":
 
         df = pd.read_csv("DATA BATIK DINAS UMKM 1.csv")
         df_new = df.drop(["nama_usaha", "alamat", "tahun"], axis=1)
-
         num = {"SIUP": 2, "proses pengurusan": 1, "tidak memiliki": 0}
         df_new["surat Izin"] = df_new["surat Izin"].map(num)
 
@@ -241,22 +206,9 @@ if selected == "Entropy Weighting":
         weights_entropy = entropy_weighting(df_scaled.values)
         df_entropy_weighted = df_scaled * weights_entropy
 
-        st.subheader("📌 Bobot Entropy untuk Setiap Fitur")
-        weight_df = pd.DataFrame(
-            {"Fitur": df_new.columns, "Bobot": weights_entropy}
-        ).sort_values(by="Bobot", ascending=False).reset_index(drop=True)
-        st.dataframe(weight_df)
-
-        st.subheader("📊 Data Hasil Pembobotan Entropy")
+        weight_df = pd.DataFrame({"Fitur": df_new.columns, "Bobot": weights_entropy}).sort_values(by="Bobot", ascending=False)
+        st.dataframe(weight_df.reset_index(drop=True))
         st.dataframe(df_entropy_weighted)
-
-        st.subheader("🔥 Visualisasi Bobot Fitur (Entropy Weighting)")
-        heatmap_data = pd.DataFrame([weight_df["Bobot"].values], columns=weight_df["Fitur"])
-        fig, ax = plt.subplots(figsize=(10, 3))
-        sns.heatmap(heatmap_data, annot=True, cmap="YlOrRd", cbar=False, fmt=".3f", ax=ax)
-        ax.set_title("Entropy Weighting - Feature Importance", fontsize=14, weight="bold")
-        ax.set_yticks([])
-        st.pyplot(fig)
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -268,16 +220,17 @@ if selected == "Clustering":
         st.markdown("<div class='stCard'>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align:center;'>🔗 CLUSTERING: AHC vs FCM</h2>", unsafe_allow_html=True)
 
-        st.write(""" Pada tahap ini Dilakukan Skenario Uji :
-        1. AHC Tanpa Seleksi Fitur
-        2. FCM Tanpa Seleksi Fitur
-        3. AHC Dengan Seleksi Fitur
-        4. FCM Dengan Seleksi Fitur
+        st.write("""Skenario Uji:
+        1) AHC Tanpa Seleksi Fitur
+        2) FCM Tanpa Seleksi Fitur
+        3) AHC Dengan Seleksi Fitur (Entropy Weighting)
+        4) FCM Dengan Seleksi Fitur (Entropy Weighting)
         """)
 
-        # load & preprocessing
+        # ===== Load & preprocess =====
         df = pd.read_csv("DATA BATIK DINAS UMKM 1.csv")
         df_new = df.drop(["nama_usaha", "alamat", "tahun"], axis=1)
+
         num = {"SIUP": 2, "proses pengurusan": 1, "tidak memiliki": 0}
         df_new["surat Izin"] = df_new["surat Izin"].map(num)
 
@@ -288,323 +241,159 @@ if selected == "Clustering":
         weights_entropy = entropy_weighting(df_scaled.values)
         df_entropy_weighted = df_scaled * weights_entropy
 
-        # feature ranking
         feature_ranking = pd.DataFrame(
             {"Feature": df_new.columns, "Weight": weights_entropy}
         ).sort_values(by="Weight", ascending=False).reset_index(drop=True)
+
         selected_features = feature_ranking["Feature"].iloc[:5].tolist()
+        X_sub = df_entropy_weighted[selected_features].values
 
         range_n_clusters = range(2, 11)
 
         # =====================================================
-        # 1. AHC - Tanpa Seleksi Fitur
+        # Kumpulkan semua hasil untuk VALIDASI tunggal (CH)
         # =====================================================
-        st.subheader("🔹 AHC - Tanpa Seleksi Fitur")
-        scores_agg_norm, dbi_agg_norm = [], []
+        scenario_results = []
 
-        for k in range_n_clusters:
-            agg = AgglomerativeClustering(n_clusters=k, linkage='ward')
-            agg_labels = agg.fit_predict(X_norm)
+        def eval_scenario(name, X, is_fcm=False):
+            sil_list, dbi_list, ch_list = [], [], []
+            labels_per_k = {}
 
-            sil = silhouette_score(X_norm, agg_labels)
-            dbi = davies_bouldin_score(X_norm, agg_labels)
+            for k in range_n_clusters:
+                if not is_fcm:
+                    labels = AgglomerativeClustering(n_clusters=k, linkage="ward").fit_predict(X)
+                else:
+                    cntr, u, *_ = fuzz.cluster.cmeans(
+                        X.T, c=k, m=2, error=0.005, maxiter=1000, init=None, seed=42
+                    )
+                    labels = np.argmax(u, axis=0)
 
-            scores_agg_norm.append(sil)
-            dbi_agg_norm.append(dbi)
+                sil_list.append(silhouette_score(X, labels))
+                dbi_list.append(davies_bouldin_score(X, labels))
+                ch_list.append(calinski_harabasz_score(X, labels))
 
-        best_agg_score_norm = max(scores_agg_norm)
-        best_agg_k_norm = list(range_n_clusters)[scores_agg_norm.index(best_agg_score_norm)]
+                labels_per_k[k] = labels
 
-        best_agg_dbi_norm = min(dbi_agg_norm)
-        best_agg_k_dbi_norm = list(range_n_clusters)[dbi_agg_norm.index(best_agg_dbi_norm)]
+            return {
+                "Skenario": name,
+                "X": X,
+                "is_fcm": is_fcm,
+                "sil": sil_list,
+                "dbi": dbi_list,
+                "ch": ch_list,
+                "labels_per_k": labels_per_k
+            }
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.pyplot(plot_metric_curve(range_n_clusters, scores_agg_norm, best_agg_k_norm,
-                                        "AHC (Tanpa Seleksi) - Silhouette", "Silhouette Score", color="blue"))
-        with col2:
-            st.pyplot(plot_metric_curve(range_n_clusters, dbi_agg_norm, best_agg_k_dbi_norm,
-                                        "AHC (Tanpa Seleksi) - DBI", "Davies–Bouldin Index", color="black"))
-
-        st.write("📌 Hasil per K:")
-        for k, sil, dbi in zip(range_n_clusters, scores_agg_norm, dbi_agg_norm):
-            st.text(f"k={k}, Silhouette={sil:.4f}, DBI={dbi:.4f}")
-
-        st.info(f"✅ Best Silhouette: K={best_agg_k_norm}, Silhouette={best_agg_score_norm:.4f}")
-        st.info(f"✅ Best DBI (Minimum): K={best_agg_k_dbi_norm}, DBI={best_agg_dbi_norm:.4f}")
-
-        # =====================================================
-        # 2. FCM - Tanpa Seleksi Fitur
-        # =====================================================
-        st.subheader("🔹 FCM - Tanpa Seleksi Fitur")
-        scores_fcm_norm, dbi_fcm_norm = [], []
-
-        data_norm_T = X_norm.T
-        for k in range_n_clusters:
-            cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-                data_norm_T, c=k, m=2, error=0.005, maxiter=1000, init=None, seed=42
-            )
-            fcm_labels = np.argmax(u, axis=0)
-
-            sil = silhouette_score(X_norm, fcm_labels)
-            dbi = davies_bouldin_score(X_norm, fcm_labels)
-
-            scores_fcm_norm.append(sil)
-            dbi_fcm_norm.append(dbi)
-
-        best_fcm_score_norm = max(scores_fcm_norm)
-        best_fcm_k_norm = list(range_n_clusters)[scores_fcm_norm.index(best_fcm_score_norm)]
-
-        best_fcm_dbi_norm = min(dbi_fcm_norm)
-        best_fcm_k_dbi_norm = list(range_n_clusters)[dbi_fcm_norm.index(best_fcm_dbi_norm)]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.pyplot(plot_metric_curve(range_n_clusters, scores_fcm_norm, best_fcm_k_norm,
-                                        "FCM (Tanpa Seleksi) - Silhouette", "Silhouette Score", color="orange"))
-        with col2:
-            st.pyplot(plot_metric_curve(range_n_clusters, dbi_fcm_norm, best_fcm_k_dbi_norm,
-                                        "FCM (Tanpa Seleksi) - DBI", "Davies–Bouldin Index", color="black"))
-
-        st.write("📌 Hasil per K:")
-        for k, sil, dbi in zip(range_n_clusters, scores_fcm_norm, dbi_fcm_norm):
-            st.text(f"k={k}, Silhouette={sil:.4f}, DBI={dbi:.4f}")
-
-        st.info(f"✅ Best Silhouette: K={best_fcm_k_norm}, Silhouette={best_fcm_score_norm:.4f}")
-        st.info(f"✅ Best DBI (Minimum): K={best_fcm_k_dbi_norm}, DBI={best_fcm_dbi_norm:.4f}")
+        scenario_results.append(eval_scenario("AHC Tanpa Seleksi Fitur", X_norm, is_fcm=False))
+        scenario_results.append(eval_scenario("FCM Tanpa Seleksi Fitur", X_norm, is_fcm=True))
+        scenario_results.append(eval_scenario("AHC Dengan Seleksi Fitur", X_sub, is_fcm=False))
+        scenario_results.append(eval_scenario("FCM Dengan Seleksi Fitur", X_sub, is_fcm=True))
 
         # =====================================================
-        # 3. AHC - Dengan Seleksi Fitur
+        # VALIDASI TUNGGAL (CH) untuk memilih metrik evaluasi:
+        # pilih Silhouette jika corr(CH, Sil) >= corr(CH, -DBI), else pilih DBI
         # =====================================================
-        st.subheader("🔹 AHC - Dengan Seleksi Fitur (5 Fitur Teratas)")
-        X_sub = df_entropy_weighted[selected_features].values
+        all_ch = np.concatenate([np.array(s["ch"]) for s in scenario_results])
+        all_sil = np.concatenate([np.array(s["sil"]) for s in scenario_results])
+        all_dbi = np.concatenate([np.array(s["dbi"]) for s in scenario_results])
 
-        scores_agg_weighted, dbi_agg_weighted = [], []
-        for k in range_n_clusters:
-            agg = AgglomerativeClustering(n_clusters=k, linkage='ward')
-            agg_labels = agg.fit_predict(X_sub)
+        corr_ch_sil = safe_corr(all_ch, all_sil)
+        corr_ch_dbi_inv = safe_corr(all_ch, -all_dbi)
 
-            sil = silhouette_score(X_sub, agg_labels)
-            dbi = davies_bouldin_score(X_sub, agg_labels)
-
-            scores_agg_weighted.append(sil)
-            dbi_agg_weighted.append(dbi)
-
-        best_agg_score_weighted = max(scores_agg_weighted)
-        best_agg_k_weighted = list(range_n_clusters)[scores_agg_weighted.index(best_agg_score_weighted)]
-
-        best_agg_dbi_weighted = min(dbi_agg_weighted)
-        best_agg_k_dbi_weighted = list(range_n_clusters)[dbi_agg_weighted.index(best_agg_dbi_weighted)]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.pyplot(plot_metric_curve(range_n_clusters, scores_agg_weighted, best_agg_k_weighted,
-                                        "AHC (Seleksi) - Silhouette", "Silhouette Score", color="green"))
-        with col2:
-            st.pyplot(plot_metric_curve(range_n_clusters, dbi_agg_weighted, best_agg_k_dbi_weighted,
-                                        "AHC (Seleksi) - DBI", "Davies–Bouldin Index", color="black"))
-
-        st.write("📌 Hasil per K:")
-        for k, sil, dbi in zip(range_n_clusters, scores_agg_weighted, dbi_agg_weighted):
-            st.text(f"k={k}, Silhouette={sil:.4f}, DBI={dbi:.4f}")
-
-        st.info(f"✅ Best Silhouette: K={best_agg_k_weighted}, Silhouette={best_agg_score_weighted:.4f}")
-        st.info(f"✅ Best DBI (Minimum): K={best_agg_k_dbi_weighted}, DBI={best_agg_dbi_weighted:.4f}")
-
-        # =====================================================
-        # 4. FCM - Dengan Seleksi Fitur
-        # =====================================================
-        st.subheader("🔹 FCM - Dengan Seleksi Fitur (5 Fitur Teratas)")
-
-        # Simpan df_entropy_weighted sekali agar stabil saat rerun
-        if "df_entropy_weighted" not in st.session_state:
-            st.session_state["df_entropy_weighted"] = df_entropy_weighted.copy()
-        df_entropy_weighted = st.session_state["df_entropy_weighted"]
-
-        k_feat = 5
-        selected_features = feature_ranking["Feature"].iloc[:k_feat].tolist()
-        removed_features = feature_ranking["Feature"].iloc[k_feat:].tolist()
-
-        st.write(f"**Fitur digunakan:** {', '.join(selected_features)}")
-        if removed_features:
-            st.write(f"**Fitur tidak digunakan:** {', '.join(removed_features)}")
-
-        X_sub = df_entropy_weighted[selected_features].values
-        data_weighted_T = X_sub.T
-
-        scores_fcm_weighted, dbi_fcm_weighted = [], []
-
-        for k in range_n_clusters:
-            cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-                data_weighted_T, c=k, m=2, error=0.005, maxiter=1000, init=None, seed=42
-            )
-            fcm_labels = np.argmax(u, axis=0)
-
-            sil = silhouette_score(X_sub, fcm_labels)
-            dbi = davies_bouldin_score(X_sub, fcm_labels)
-
-            scores_fcm_weighted.append(sil)
-            dbi_fcm_weighted.append(dbi)
-
-        best_fcm_score_weighted = max(scores_fcm_weighted)
-        best_fcm_k_weighted = list(range_n_clusters)[scores_fcm_weighted.index(best_fcm_score_weighted)]
-
-        best_fcm_dbi_weighted = min(dbi_fcm_weighted)
-        best_fcm_k_dbi_weighted = list(range_n_clusters)[dbi_fcm_weighted.index(best_fcm_dbi_weighted)]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.pyplot(plot_metric_curve(range_n_clusters, scores_fcm_weighted, best_fcm_k_weighted,
-                                        "FCM (Seleksi) - Silhouette", "Silhouette Score", color="purple"))
-        with col2:
-            st.pyplot(plot_metric_curve(range_n_clusters, dbi_fcm_weighted, best_fcm_k_dbi_weighted,
-                                        "FCM (Seleksi) - DBI", "Davies–Bouldin Index", color="black"))
-
-        st.write("📊 **Hasil per K:**")
-        for k, sil, dbi in zip(range_n_clusters, scores_fcm_weighted, dbi_fcm_weighted):
-            st.text(f"k={k}, Silhouette={sil:.4f}, DBI={dbi:.4f}")
-
-        st.info(f"✅ Best Silhouette: K={best_fcm_k_weighted}, Silhouette={best_fcm_score_weighted:.4f}")
-        st.info(f"✅ Best DBI (Minimum): K={best_fcm_k_dbi_weighted}, DBI={best_fcm_dbi_weighted:.4f}")
-
-        # Jalankan ulang FCM dengan K terbaik (berdasarkan Silhouette) untuk ringkasan cluster
-        cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-            data_weighted_T, c=best_fcm_k_weighted, m=2, error=0.005, maxiter=1000, init=None, seed=42
-        )
-        best_labels = np.argmax(u, axis=0) + 1
-
-        df_with_cluster = df[selected_features].copy()
-        df_with_cluster["Cluster"] = best_labels
-
-        # Ringkasan cluster
-        num_features = [col for col in selected_features if col != "surat Izin"]
-        if num_features:
-            cluster_min = df_with_cluster.groupby("Cluster")[num_features].min()
-            cluster_max = df_with_cluster.groupby("Cluster")[num_features].max()
-            cluster_ranges = cluster_min.astype(str) + " – " + cluster_max.astype(str)
-            cluster_ranges = cluster_ranges.reset_index()
+        if corr_ch_sil >= corr_ch_dbi_inv:
+            chosen_metric = "Silhouette"
+            metric_rule = "maksimum"
         else:
-            cluster_ranges = pd.DataFrame({"Cluster": df_with_cluster["Cluster"].unique()})
+            chosen_metric = "DBI"
+            metric_rule = "minimum"
 
-        if "surat Izin" in selected_features:
-            izin_dist = df_with_cluster.groupby(["Cluster", "surat Izin"]).size().unstack(fill_value=0).reset_index()
-            cluster_summary = pd.merge(cluster_ranges, izin_dist, on="Cluster", how="left")
+        st.subheader("✅ Validasi Tunggal (Calinski–Harabasz) → Pilih Metrik Evaluasi")
+        st.write(f"- Korelasi CH vs Silhouette: **{corr_ch_sil:.4f}**")
+        st.write(f"- Korelasi CH vs (-DBI): **{corr_ch_dbi_inv:.4f}**")
+        st.success(f"➡️ Metrik evaluasi yang dipakai: **{chosen_metric}** (ambil nilai {metric_rule})")
+
+        # =====================================================
+        # Tampilkan grafik per skenario: Silhouette & DBI (informasi),
+        # tetapi pemilihan BEST pakai metrik terpilih
+        # =====================================================
+        st.subheader("📈 Kurva Evaluasi per Skenario (Silhouette & DBI)")
+
+        recap_rows = []
+        for s in scenario_results:
+            name = s["Skenario"]
+            sil = s["sil"]
+            dbi = s["dbi"]
+
+            best_k_sil = list(range_n_clusters)[int(np.argmax(sil))]
+            best_sil = float(np.max(sil))
+
+            best_k_dbi = list(range_n_clusters)[int(np.argmin(dbi))]
+            best_dbi = float(np.min(dbi))
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.pyplot(plot_metric_curve(range_n_clusters, sil, best_k_sil,
+                                            f"{name} - Silhouette", "Silhouette", color="blue"))
+            with c2:
+                st.pyplot(plot_metric_curve(range_n_clusters, dbi, best_k_dbi,
+                                            f"{name} - DBI", "DBI", color="black"))
+
+            recap_rows.append({
+                "Skenario": name,
+                "BestK_Silhouette": best_k_sil,
+                "Silhouette_Max": best_sil,
+                "BestK_DBI": best_k_dbi,
+                "DBI_Min": best_dbi
+            })
+
+        df_recap = pd.DataFrame(recap_rows)
+        st.dataframe(df_recap)
+
+        # =====================================================
+        # Pilih metode terbaik berdasarkan metrik yang dipilih
+        # =====================================================
+        if chosen_metric == "Silhouette":
+            best_row = df_recap.loc[df_recap["Silhouette_Max"].idxmax()]
+            best_method = best_row["Skenario"]
+            best_k = int(best_row["BestK_Silhouette"])
+            best_value = float(best_row["Silhouette_Max"])
+            st.success(f"✅ Metode terbaik berdasarkan **Silhouette**: **{best_method}** | K={best_k} | Silhouette={best_value:.4f}")
         else:
-            cluster_summary = cluster_ranges
+            best_row = df_recap.loc[df_recap["DBI_Min"].idxmin()]
+            best_method = best_row["Skenario"]
+            best_k = int(best_row["BestK_DBI"])
+            best_value = float(best_row["DBI_Min"])
+            st.success(f"✅ Metode terbaik berdasarkan **DBI**: **{best_method}** | K={best_k} | DBI={best_value:.4f}")
 
-        st.write("📋 **Ringkasan Tiap Cluster dari FCM dengan seleksi fitur:**")
-        st.dataframe(cluster_summary)
-
-        # =====================================================
-        # Rekapitulasi Hasil
-        # =====================================================
-        st.subheader("📊 Rekapitulasi Hasil 4 Skenario")
-
-        df_results = pd.DataFrame({
-            "Skenario": [
-                "AHC Tanpa Seleksi Fitur",
-                "FCM Tanpa Seleksi Fitur",
-                "AHC Dengan Seleksi Fitur",
-                "FCM Dengan Seleksi Fitur"
-            ],
-            "Best K (Silhouette)": [
-                best_agg_k_norm,
-                best_fcm_k_norm,
-                best_agg_k_weighted,
-                best_fcm_k_weighted
-            ],
-            "Silhouette (Max)": [
-                round(best_agg_score_norm, 4),
-                round(best_fcm_score_norm, 4),
-                round(best_agg_score_weighted, 4),
-                round(best_fcm_score_weighted, 4)
-            ],
-            "Best K (DBI)": [
-                best_agg_k_dbi_norm,
-                best_fcm_k_dbi_norm,
-                best_agg_k_dbi_weighted,
-                best_fcm_k_dbi_weighted
-            ],
-            "DBI (Min)": [
-                round(best_agg_dbi_norm, 4),
-                round(best_fcm_dbi_norm, 4),
-                round(best_agg_dbi_weighted, 4),
-                round(best_fcm_dbi_weighted, 4)
-            ]
-        })
-        st.dataframe(df_results)
-
-        # Grafik Silhouette (terpisah)
-        fig5, ax5 = plt.subplots(figsize=(10, 5))
-        methods = df_results["Skenario"]
-        best_scores = df_results["Silhouette (Max)"]
-        best_ks = df_results["Best K (Silhouette)"]
-        bars = ax5.bar(methods, best_scores, color=['skyblue', 'salmon', 'lightgreen', 'orange'], width=0.5)
-
-        ymax = float(best_scores.max())
-        ax5.set_ylim(0, ymax * 1.25 if ymax > 0 else 1)
-
-        for bar, score, k in zip(bars, best_scores, best_ks):
-            ax5.text(bar.get_x() + bar.get_width()/2, score + (ymax * 0.03),
-                     f"{score:.4f}\n(k={k})", ha='center', va='bottom', fontsize=9, fontweight='bold')
-
-        ax5.set_ylabel("Silhouette Score (lebih besar lebih baik)")
-        ax5.set_title("Perbandingan Silhouette Terbaik\nAHC vs FCM (Tanpa & Dengan Seleksi Fitur)", pad=15)
-        plt.xticks(rotation=15, ha='right')
-        plt.tight_layout()
-        st.pyplot(fig5)
-
-        # Grafik DBI (terpisah)
-        fig_dbi, ax_dbi = plt.subplots(figsize=(10, 5))
-        best_dbis = df_results["DBI (Min)"]
-        best_ks_dbi = df_results["Best K (DBI)"]
-        bars2 = ax_dbi.bar(methods, best_dbis, color=['skyblue', 'salmon', 'lightgreen', 'orange'], width=0.5)
-
-        ymax2 = float(best_dbis.max())
-        ax_dbi.set_ylim(0, ymax2 * 1.25 if ymax2 > 0 else 1)
-
-        for bar, val, k in zip(bars2, best_dbis, best_ks_dbi):
-            ax_dbi.text(bar.get_x() + bar.get_width()/2, val + (ymax2 * 0.03),
-                        f"{val:.4f}\n(k={k})", ha='center', va='bottom', fontsize=9, fontweight='bold')
-
-        ax_dbi.set_ylabel("DBI (lebih kecil lebih baik)")
-        ax_dbi.set_title("Perbandingan DBI Terbaik (Minimum)\nAHC vs FCM (Tanpa & Dengan Seleksi Fitur)", pad=15)
-        plt.xticks(rotation=15, ha='right')
-        plt.tight_layout()
-        st.pyplot(fig_dbi)
-
-        # Pilih metode terbaik berdasarkan Silhouette (evaluasi utama)
-        best_row = df_results.loc[df_results["Silhouette (Max)"].idxmax()]
-        st.session_state["best_method"] = best_row["Skenario"]
-        st.session_state["best_k"] = int(best_row["Best K (Silhouette)"])
-        st.session_state["best_score"] = float(best_row["Silhouette (Max)"])
-
-        st.success(
-            f"✅ Metode terbaik adalah **{st.session_state['best_method']}** "
-            f"dengan K={st.session_state['best_k']} dan Silhouette={st.session_state['best_score']:.4f}"
-        )
+        st.session_state["best_method"] = best_method
+        st.session_state["best_k"] = best_k
+        st.session_state["best_metric"] = chosen_metric
+        st.session_state["best_metric_value"] = best_value
 
         # =====================================================
-        # Generate final labels & simpan hasil clustering ke session_state
+        # Generate final labels sesuai metode terbaik
         # =====================================================
         st.subheader("📥 Download Hasil Clustering")
 
-        metode_terbaik = st.session_state["best_method"]
-        k_terbaik = st.session_state["best_k"]
+        # cari skenario terpilih
+        chosen_scenario = None
+        for s in scenario_results:
+            if s["Skenario"] == best_method:
+                chosen_scenario = s
+                break
 
-        labels_final = None
+        X_use = chosen_scenario["X"]
+        is_fcm = chosen_scenario["is_fcm"]
 
-        if "AHC" in metode_terbaik:
-            model_final = AgglomerativeClustering(n_clusters=k_terbaik, linkage='ward')
-            labels_final = model_final.fit_predict(X_norm)
-            centroids = np.array([X_norm[labels_final == i].mean(axis=0) for i in range(k_terbaik)])
+        if not is_fcm:
+            model_final = AgglomerativeClustering(n_clusters=best_k, linkage="ward")
+            labels_final = model_final.fit_predict(X_use)
+            centroids = np.array([X_use[labels_final == i].mean(axis=0) for i in range(best_k)])
             st.session_state["ahc_centroids"] = centroids
             st.session_state["ahc_model"] = model_final
-
-        elif "FCM" in metode_terbaik:
-            data_final_T = X_norm.T
-            cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-                data_final_T, c=k_terbaik, m=2, error=0.005, maxiter=1000, init=None, seed=42
+        else:
+            cntr, u, *_ = fuzz.cluster.cmeans(
+                X_use.T, c=best_k, m=2, error=0.005, maxiter=1000, init=None, seed=42
             )
             labels_final = np.argmax(u, axis=0)
             st.session_state["fcm_cntr"] = cntr
@@ -614,7 +403,6 @@ if selected == "Clustering":
         df_hasil = df.copy()
         df_hasil["Cluster"] = labels_final
         df_hasil = df_hasil.sort_values(by="Cluster").reset_index(drop=True)
-
         st.session_state["df_clustered"] = df_hasil
 
         st.dataframe(df_hasil)
@@ -642,9 +430,11 @@ if selected == "Implementation":
         else:
             best_method = st.session_state["best_method"]
             best_k = st.session_state["best_k"]
-            st.info(f"📌 Prediksi menggunakan metode terbaik hasil clustering sebelumnya: **{best_method}** (K={best_k})")
+            chosen_metric = st.session_state.get("best_metric", "-")
+            metric_val = st.session_state.get("best_metric_value", "-")
 
-            # Form input
+            st.info(f"📌 Metode terbaik: **{best_method}** | K={best_k} | Metrik={chosen_metric} ({metric_val})")
+
             with st.form("form_batik"):
                 nama_usaha = st.text_input("Nama Usaha")
                 alamat = st.text_area("Alamat")
@@ -691,28 +481,29 @@ if selected == "Implementation":
 
                     scaler = MinMaxScaler()
                     X_scaled = scaler.fit_transform(df_new)
+
                     input_data = input_data[df_new.columns]
                     input_scaled = scaler.transform(input_data)
 
-                    if "ahc_centroids" not in st.session_state and "fcm_cntr" not in st.session_state:
-                        if "AHC" in best_method:
+                    cluster_label = None
+                    if "AHC" in best_method:
+                        if "ahc_centroids" not in st.session_state:
                             model = AgglomerativeClustering(n_clusters=best_k, linkage='ward')
                             labels = model.fit_predict(X_scaled)
                             centroids = np.array([X_scaled[labels == i].mean(axis=0) for i in range(best_k)])
                             st.session_state["ahc_centroids"] = centroids
-                        elif "FCM" in best_method:
-                            data_T = X_scaled.T
-                            cntr, u, u0, d, jm, p, fpc = fuzz.cluster.cmeans(
-                                data_T, c=best_k, m=2, error=0.005, maxiter=1000, init=None, seed=42
-                            )
-                            st.session_state["fcm_cntr"] = cntr
 
-                    cluster_label = None
-                    if "AHC" in best_method:
                         centroids = st.session_state["ahc_centroids"]
                         dists = np.linalg.norm(centroids - input_scaled, axis=1)
                         cluster_label = int(np.argmin(dists)) + 1
+
                     elif "FCM" in best_method:
+                        if "fcm_cntr" not in st.session_state:
+                            cntr, u, *_ = fuzz.cluster.cmeans(
+                                X_scaled.T, c=best_k, m=2, error=0.005, maxiter=1000, init=None, seed=42
+                            )
+                            st.session_state["fcm_cntr"] = cntr
+
                         cntr = st.session_state["fcm_cntr"]
                         u_pred = fuzz.cluster.cmeans_predict(input_scaled.T, cntr, m=2, error=0.005, maxiter=1000)[0]
                         cluster_label = int(np.argmax(u_pred, axis=0)[0]) + 1
@@ -721,19 +512,7 @@ if selected == "Implementation":
                     st.success(f"UMKM **{nama_usaha}** masuk ke **Cluster {cluster_label}** (Metode: {best_method}, K={best_k})")
 
                     if "df_clustered" not in st.session_state:
-                        if "AHC" in best_method and "ahc_centroids" in st.session_state:
-                            centroids = st.session_state["ahc_centroids"]
-                            labels_all = np.argmin(np.linalg.norm(centroids[:, None, :] - X_scaled[None, :, :], axis=2), axis=0) + 1
-                        elif "fcm_cntr" in st.session_state:
-                            cntr = st.session_state["fcm_cntr"]
-                            u_all = fuzz.cluster.cmeans_predict(X_scaled.T, cntr, m=2, error=0.005, maxiter=1000)[0]
-                            labels_all = np.argmax(u_all, axis=0) + 1
-                        else:
-                            labels_all = np.zeros(X_scaled.shape[0], dtype=int) + 1
-
-                        df_hasil = df.copy()
-                        df_hasil["Cluster"] = labels_all
-                        st.session_state["df_clustered"] = df_hasil
+                        st.session_state["df_clustered"] = df.copy()
 
                     df_clustered = st.session_state["df_clustered"].copy()
 
