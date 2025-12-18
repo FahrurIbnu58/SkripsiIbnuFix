@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import altair as alt
 
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from sklearn.cluster import AgglomerativeClustering
@@ -73,6 +72,7 @@ st.markdown("""
             padding-top: 1rem;
         }
         .small-note { color:#546e7a; font-size:0.9rem; }
+        .hint { color:#455a64; font-size:0.9rem; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -81,7 +81,7 @@ st.markdown("""
 # -------------------------------------
 st.markdown("""
 <h1 style='text-align: center; font-size: 30px;'>
-Perbandingan Metode Agglomerative Hierarchical Clustering (AHC) dan Fuzzy C-Means (FCM) Untuk Klasterisasi (Dinamis)
+Perbandingan Metode Agglomerative Hierarchical Clustering (AHC) dan Fuzzy C-Means (FCM) Untuk Klasterisasi (Input Excel)
 </h1>
 """, unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
@@ -131,6 +131,7 @@ def ensure_session_defaults():
     st.session_state.setdefault("drop_cols", [])
     st.session_state.setdefault("cat_cols", [])
     st.session_state.setdefault("status_preprocess_ok", False)
+    st.session_state.setdefault("sheet_name", None)
 
 ensure_session_defaults()
 
@@ -159,21 +160,30 @@ selected = option_menu(
 )
 
 # ======================================================
-# Sidebar: Upload Data (dipakai semua halaman)
+# Sidebar: Upload Data Excel (dipakai semua halaman)
 # ======================================================
 with st.sidebar:
-    st.markdown("### 📤 Upload Dataset")
-    uploaded = st.file_uploader("Upload file CSV", type=["csv"])
+    st.markdown("### 📤 Upload Dataset (Excel)")
+    uploaded = st.file_uploader("Upload file Excel (.xlsx / .xls)", type=["xlsx", "xls"])
 
     if uploaded is not None:
         try:
-            df = pd.read_csv(uploaded)
+            # Ambil daftar sheet
+            xls = pd.ExcelFile(uploaded)
+            sheet_names = xls.sheet_names
+
+            sheet = st.selectbox("Pilih sheet", sheet_names, index=0)
+            df = pd.read_excel(xls, sheet_name=sheet)
+
             st.session_state["df_raw"] = df
-            st.success("✅ Dataset berhasil di-load.")
+            st.session_state["sheet_name"] = sheet
+            st.success("✅ Dataset Excel berhasil di-load.")
+            st.caption(f"Sheet: {sheet}")
             st.caption(f"Baris: {df.shape[0]} | Kolom: {df.shape[1]}")
+
         except Exception as e:
             st.session_state["df_raw"] = None
-            st.error(f"Gagal membaca CSV: {e}")
+            st.error(f"Gagal membaca Excel: {e}")
 
     st.markdown("---")
     st.markdown("### ♻️ Reset")
@@ -181,6 +191,7 @@ with st.sidebar:
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
+
 
 # ======================================================
 # Description Section
@@ -191,8 +202,8 @@ if selected == "Description":
         st.markdown("<h2 style='text-align:center;'>📘 DESKRIPSI DATASET</h2>", unsafe_allow_html=True)
 
         if st.session_state["df_raw"] is None:
-            st.warning("⚠️ Silakan upload dataset CSV di sidebar dulu.")
-            st.markdown("<p class='small-note'>Dataset sekarang dinamis: user wajib upload CSV sendiri.</p>", unsafe_allow_html=True)
+            st.warning("⚠️ Silakan upload dataset Excel di sidebar dulu.")
+            st.markdown("<p class='small-note'>Sekarang input file hanya Excel (.xlsx/.xls).</p>", unsafe_allow_html=True)
         else:
             df = st.session_state["df_raw"]
             st.dataframe(df, use_container_width=True)
@@ -210,7 +221,7 @@ if selected == "Preprocessing":
         st.markdown("<h2 style='text-align:center;'>⚙️ PREPROCESSING DATA (DINAMIS)</h2>", unsafe_allow_html=True)
 
         if st.session_state["df_raw"] is None:
-            st.warning("⚠️ Silakan upload dataset CSV di sidebar dulu.")
+            st.warning("⚠️ Silakan upload dataset Excel di sidebar dulu.")
             st.markdown("</div>", unsafe_allow_html=True)
         else:
             df = st.session_state["df_raw"].copy()
@@ -241,22 +252,25 @@ if selected == "Preprocessing":
             )
 
             st.write("### 3) Label Encoding (Opsional)")
-            has_categorical = st.radio("Apakah ada kolom kategorikal (teks/kategori)?", ["Tidak", "Ya"], horizontal=True)
+            has_categorical = st.radio(
+                "Apakah ada kolom kategorikal (teks/kategori)?",
+                ["Tidak", "Ya"],
+                horizontal=True
+            )
 
             cat_cols = []
             if has_categorical == "Ya":
-                # rekomendasi otomatis: kolom object / category
                 suggested = [c for c in df.columns if str(df[c].dtype) in ["object", "category"]]
                 cat_cols = st.multiselect(
                     "Pilih kolom yang ingin di-encode menjadi numerik",
                     options=df.columns.tolist(),
                     default=st.session_state.get("cat_cols", suggested)
                 )
+                st.markdown("<div class='hint'>Catatan: LabelEncoder akan memberi angka 0..n untuk setiap kategori.</div>", unsafe_allow_html=True)
 
             st.markdown("---")
-            st.write("### 4) Pilih Kolom yang Dipakai untuk Modeling")
-            st.caption("Hanya kolom numerik (setelah encoding) yang bisa diproses normalisasi & clustering.")
-            # nanti dipilih setelah proses drop & encoding
+            st.write("### 4) Jalankan Preprocessing")
+            st.caption("Output preprocessing akan disimpan untuk dipakai di Entropy Weighting & Clustering.")
 
             if st.button("▶️ Jalankan Preprocessing"):
                 work = df.copy()
@@ -294,17 +308,15 @@ if selected == "Preprocessing":
                     for c in cat_cols:
                         if c in work.columns:
                             le = LabelEncoder()
-                            # pastikan string, handle NaN sudah diatasi di step missing
                             work[c] = le.fit_transform(work[c].astype(str))
                             encoders[c] = le
 
                 # Pastikan numeric-only untuk scaling
                 numeric_cols = work.select_dtypes(include=[np.number]).columns.tolist()
                 if len(numeric_cols) == 0:
-                    st.error("❌ Tidak ada kolom numerik untuk diproses. Pastikan sudah memilih encoding untuk kolom kategorikal.")
+                    st.error("❌ Tidak ada kolom numerik untuk diproses. Pilih kolom kategorikal untuk encoding atau pastikan ada kolom numerik.")
                     st.stop()
 
-                # pilih kolom modeling (default semua numerik)
                 st.session_state["df_preprocessed"] = work
                 st.session_state["drop_cols"] = drop_cols
                 st.session_state["cat_cols"] = cat_cols
@@ -319,9 +331,8 @@ if selected == "Preprocessing":
                 st.session_state["scaler"] = scaler
                 st.session_state["status_preprocess_ok"] = True
 
-                st.success("✅ Preprocessing selesai. Hasil (preprocessed & normalized) ditampilkan di bawah.")
+                st.success("✅ Preprocessing selesai. Hasil ditampilkan di bawah.")
 
-            # Tampilkan hasil bila sudah ada
             if st.session_state.get("status_preprocess_ok", False):
                 st.markdown("---")
                 st.subheader("✅ Hasil Setelah Drop/Encoding/Missing Handling")
@@ -330,7 +341,6 @@ if selected == "Preprocessing":
                 st.subheader("✅ Hasil Normalisasi (0–1)")
                 st.dataframe(st.session_state["df_scaled"].head(50), use_container_width=True)
 
-                # Download
                 st.markdown("### 📥 Download Hasil")
                 c1, c2 = st.columns(2)
                 with c1:
@@ -343,7 +353,7 @@ if selected == "Preprocessing":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# Entropy Weighting Section (pakai df_scaled dari preprocessing)
+# Entropy Weighting Section
 # ======================================================
 if selected == "Entropy Weighting":
     with st.container():
@@ -384,7 +394,7 @@ if selected == "Entropy Weighting":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# Clustering Section (pakai hasil preprocessing)
+# Clustering Section
 # ======================================================
 if selected == "Clustering":
     with st.container():
@@ -429,22 +439,17 @@ if selected == "Clustering":
 
             def eval_scenario(name, X, is_fcm=False):
                 sil_list, dbi_list, ch_list = [], [], []
-                labels_per_k = {}
-
                 for k in range_n_clusters:
                     if not is_fcm:
                         labels = AgglomerativeClustering(n_clusters=k, linkage="ward").fit_predict(X)
                     else:
-                        cntr, u, *_ = fuzz.cluster.cmeans(
+                        _, u, *_ = fuzz.cluster.cmeans(
                             X.T, c=k, m=2, error=0.005, maxiter=1000, init=None, seed=42
                         )
                         labels = np.argmax(u, axis=0)
 
-                    # guard jika cluster tidak valid
                     if len(np.unique(labels)) < 2:
-                        sil = -1
-                        dbi = np.inf
-                        ch = -1
+                        sil, dbi, ch = -1, np.inf, -1
                     else:
                         sil = silhouette_score(X, labels)
                         dbi = davies_bouldin_score(X, labels)
@@ -453,25 +458,16 @@ if selected == "Clustering":
                     sil_list.append(float(sil))
                     dbi_list.append(float(dbi))
                     ch_list.append(float(ch))
-                    labels_per_k[k] = labels
 
-                return {
-                    "Skenario": name,
-                    "X": X,
-                    "is_fcm": is_fcm,
-                    "sil": sil_list,
-                    "dbi": dbi_list,
-                    "ch": ch_list,
-                    "labels_per_k": labels_per_k
-                }
+                return {"Metode": name, "X": X, "is_fcm": is_fcm, "sil": sil_list, "dbi": dbi_list, "ch": ch_list}
 
             st.markdown("---")
             if st.button("▶️ Jalankan Evaluasi Clustering"):
-                scenario_results = []
-                scenario_results.append(eval_scenario("AHC", X_sub, is_fcm=False))
-                scenario_results.append(eval_scenario("FCM", X_sub, is_fcm=True))
+                scenario_results = [
+                    eval_scenario("AHC", X_sub, is_fcm=False),
+                    eval_scenario("FCM", X_sub, is_fcm=True),
+                ]
 
-                # Validasi tunggal (CH) untuk memilih metrik evaluasi
                 all_ch = np.concatenate([np.array(s["ch"]) for s in scenario_results])
                 all_sil = np.concatenate([np.array(s["sil"]) for s in scenario_results])
                 all_dbi = np.concatenate([np.array(s["dbi"]) for s in scenario_results])
@@ -493,16 +489,17 @@ if selected == "Clustering":
 
                 st.subheader("📈 Kurva Evaluasi per Metode")
                 recap_rows = []
+                ks = list(range_n_clusters)
 
                 for s in scenario_results:
-                    name = s["Skenario"]
+                    name = s["Metode"]
                     sil = s["sil"]
                     dbi = s["dbi"]
 
-                    best_k_sil = list(range_n_clusters)[int(np.argmax(sil))]
+                    best_k_sil = ks[int(np.argmax(sil))]
                     best_sil = float(np.max(sil))
 
-                    best_k_dbi = list(range_n_clusters)[int(np.argmin(dbi))]
+                    best_k_dbi = ks[int(np.argmin(dbi))]
                     best_dbi = float(np.min(dbi))
 
                     c1, c2 = st.columns(2)
@@ -522,7 +519,6 @@ if selected == "Clustering":
                 df_recap = pd.DataFrame(recap_rows)
                 st.dataframe(df_recap, use_container_width=True)
 
-                # Pilih metode terbaik
                 if chosen_metric == "Silhouette":
                     best_row = df_recap.loc[df_recap["Silhouette_Max"].idxmax()]
                     best_method = best_row["Metode"]
@@ -536,23 +532,19 @@ if selected == "Clustering":
                     best_value = float(best_row["DBI_Min"])
                     st.success(f"✅ Metode terbaik: **{best_method}** | K={best_k} | DBI={best_value:.4f}")
 
-                # Final clustering + hasil
                 st.markdown("---")
                 st.subheader("📌 Hasil Clustering (Final)")
 
                 if best_method == "AHC":
                     labels_best = AgglomerativeClustering(n_clusters=best_k, linkage="ward").fit_predict(X_sub)
                 else:
-                    cntr_best, u_best, *_ = fuzz.cluster.cmeans(
+                    _, u_best, *_ = fuzz.cluster.cmeans(
                         X_sub.T, c=best_k, m=2, error=0.005, maxiter=1000, init=None, seed=42
                     )
                     labels_best = np.argmax(u_best, axis=0)
 
-                labels_1based = labels_best + 1
-
-                # hasil digabung dengan df_preprocessed agar user lihat konteks
                 df_out = st.session_state["df_preprocessed"].copy()
-                df_out["Cluster"] = labels_1based
+                df_out["Cluster"] = labels_best + 1
 
                 st.dataframe(df_out, use_container_width=True)
 
