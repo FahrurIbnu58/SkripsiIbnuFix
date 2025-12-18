@@ -90,7 +90,7 @@ st.markdown("""
 
 st.markdown("""
 <h1 style='text-align: center; font-size: 30px;'>
-Perbandingan Metode Agglomerative Hierarchical Clustering (AHC) dan Fuzzy C-Means (FCM) Untuk Klasterisasi (Input Excel)
+Perbandingan Metode Agglomerative Hierarchical Clustering (AHC) dan Fuzzy C-Means (FCM) Untuk Klasterisasi
 </h1>
 """, unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
@@ -353,7 +353,7 @@ if selected == "Description":
 if selected == "Preprocessing":
     with st.container():
         st.markdown("<div class='stCard'>", unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align:center;'>⚙️ PREPROCESSING DATA (DINAMIS)</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>⚙️ PREPROCESSING DATA</h2>", unsafe_allow_html=True)
 
         if st.session_state["df_raw"] is None:
             st.warning("⚠️ Silakan upload dataset Excel di sidebar dulu.")
@@ -527,7 +527,7 @@ if selected == "Preprocessing":
 if selected == "Entropy Weighting":
     with st.container():
         st.markdown("<div class='stCard'>", unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align:center;'>📊 ENTROPY WEIGHTING (DINAMIS)</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>📊 ENTROPY WEIGHTING</h2>", unsafe_allow_html=True)
 
         if not st.session_state.get("status_preprocess_ok", False):
             st.warning("⚠️ Jalankan menu *Preprocessing* dulu sampai normalisasi selesai.")
@@ -818,3 +818,4 @@ st.markdown("""
     © 2025 — Klasterisasi (By Fahrurrohman Ibnu Irsad Argyanto)
 </div>
 """, unsafe_allow_html=True)
+
