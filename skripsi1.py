@@ -11,6 +11,15 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_har
 import skfuzzy as fuzz
 from streamlit_option_menu import option_menu
 
+# ======================================================
+# Guard: pastikan dependency Excel tersedia
+# ======================================================
+try:
+    import openpyxl  # noqa: F401
+except Exception:
+    st.error("Library 'openpyxl' belum terinstall. Install dulu dengan:  pip install openpyxl")
+    st.stop()
+
 # -------------------------------------
 # 🌈 Styling Page
 # -------------------------------------
@@ -160,7 +169,7 @@ selected = option_menu(
 )
 
 # ======================================================
-# Sidebar: Upload Data Excel (dipakai semua halaman)
+# Sidebar: Upload Data Excel
 # ======================================================
 with st.sidebar:
     st.markdown("### 📤 Upload Dataset (Excel)")
@@ -168,7 +177,6 @@ with st.sidebar:
 
     if uploaded is not None:
         try:
-            # Ambil daftar sheet
             xls = pd.ExcelFile(uploaded)
             sheet_names = xls.sheet_names
 
@@ -194,7 +202,7 @@ with st.sidebar:
 
 
 # ======================================================
-# Description Section
+# Description
 # ======================================================
 if selected == "Description":
     with st.container():
@@ -213,7 +221,7 @@ if selected == "Description":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# Preprocessing Section (DINAMIS)
+# Preprocessing
 # ======================================================
 if selected == "Preprocessing":
     with st.container():
@@ -279,7 +287,7 @@ if selected == "Preprocessing":
                 if drop_cols:
                     work = work.drop(columns=drop_cols, errors="ignore")
 
-                # Missing value handling
+                # Missing handling
                 if missing_strategy == "Hapus baris yang ada NaN":
                     work = work.dropna(axis=0)
                 elif missing_strategy == "Isi NaN dengan 0 (untuk numerik)":
@@ -302,7 +310,7 @@ if selected == "Preprocessing":
                             except Exception:
                                 pass
 
-                # Encoding categorical columns
+                # Encoding
                 encoders = {}
                 if has_categorical == "Ya" and cat_cols:
                     for c in cat_cols:
@@ -311,7 +319,6 @@ if selected == "Preprocessing":
                             work[c] = le.fit_transform(work[c].astype(str))
                             encoders[c] = le
 
-                # Pastikan numeric-only untuk scaling
                 numeric_cols = work.select_dtypes(include=[np.number]).columns.tolist()
                 if len(numeric_cols) == 0:
                     st.error("❌ Tidak ada kolom numerik untuk diproses. Pilih kolom kategorikal untuk encoding atau pastikan ada kolom numerik.")
@@ -322,7 +329,6 @@ if selected == "Preprocessing":
                 st.session_state["cat_cols"] = cat_cols
                 st.session_state["encoders"] = encoders
 
-                # Normalisasi
                 scaler = MinMaxScaler()
                 X_norm = scaler.fit_transform(work[numeric_cols])
                 df_scaled = pd.DataFrame(X_norm, columns=numeric_cols)
@@ -353,7 +359,7 @@ if selected == "Preprocessing":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# Entropy Weighting Section
+# Entropy Weighting
 # ======================================================
 if selected == "Entropy Weighting":
     with st.container():
@@ -394,7 +400,7 @@ if selected == "Entropy Weighting":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# Clustering Section
+# Clustering
 # ======================================================
 if selected == "Clustering":
     with st.container():
@@ -414,7 +420,6 @@ if selected == "Clustering":
 
             use_entropy = st.checkbox("Gunakan seleksi fitur dari Entropy Weighting?", value=True)
 
-            # Jika entropy belum dihitung tapi user centang, hitung cepat
             if use_entropy and "df_entropy_weighted" not in st.session_state:
                 weights_entropy = entropy_weighting(df_scaled.values)
                 df_entropy_weighted = df_scaled * weights_entropy
