@@ -9,3 +9,4 @@ altair
 missingno
 scikit-fuzzy
 streamlit-option-menu
+openpyxl
