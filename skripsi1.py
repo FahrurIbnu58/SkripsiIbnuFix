@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 
@@ -85,6 +85,11 @@ st.markdown("""
         .hint { color:#455a64; font-size:0.9rem; }
         .warn { color:#b71c1c; font-weight:600; }
         .ok { color:#1b5e20; font-weight:600; }
+        .pill {
+            display:inline-block; padding:4px 10px; border-radius:999px;
+            background:#e8f0fe; color:#1a237e; font-weight:700; font-size:0.9rem;
+            margin-right:6px; margin-bottom:6px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -139,9 +144,12 @@ def ensure_session_defaults():
 
     st.session_state.setdefault("drop_cols", [])
     st.session_state.setdefault("cat_cols", [])
-    st.session_state.setdefault("encoders", {})          # boleh tetap ada (untuk inverse jika pakai LabelEncoder)
-    st.session_state.setdefault("manual_maps", {})       # ✅ mapping manual per kolom
+    st.session_state.setdefault("encoders", {})
+    st.session_state.setdefault("manual_maps", {})
     st.session_state.setdefault("status_preprocess_ok", False)
+
+    st.session_state.setdefault("missing_strategy", "Hapus baris yang ada NaN")
+    st.session_state.setdefault("numeric_cols_fit", [])
 
     st.session_state.setdefault("weights_entropy", None)
     st.session_state.setdefault("df_entropy_weighted", None)
@@ -155,10 +163,16 @@ def ensure_session_defaults():
     st.session_state.setdefault("df_clustered", None)
     st.session_state.setdefault("cluster_summary_best", None)
 
-    st.session_state.setdefault("ahc_centroids", None)
-    st.session_state.setdefault("fcm_cntr", None)
+    st.session_state.setdefault("ahc_centroids", None)  # centroid pada space final yang dipakai (bisa subset)
+    st.session_state.setdefault("fcm_cntr", None)       # center pada space final yang dipakai (bisa subset)
 
     st.session_state.setdefault("data_fingerprint", None)
+
+    # untuk prediksi data baru
+    st.session_state.setdefault("best_use_entropy", False)
+    st.session_state.setdefault("best_selected_features", None)  # list fitur (jika entropy topN dipakai)
+    st.session_state.setdefault("best_model_cols", None)         # kolom yang jadi input model final (setelah scaling, sebelum/atau setelah weighting & subset)
+    st.session_state.setdefault("best_is_fcm", None)
 
 ensure_session_defaults()
 
@@ -178,6 +192,9 @@ def reset_downstream():
     st.session_state["manual_maps"] = {}
     st.session_state["status_preprocess_ok"] = False
 
+    st.session_state["missing_strategy"] = "Hapus baris yang ada NaN"
+    st.session_state["numeric_cols_fit"] = []
+
     st.session_state["weights_entropy"] = None
     st.session_state["df_entropy_weighted"] = None
     st.session_state["feature_ranking"] = None
@@ -193,12 +210,12 @@ def reset_downstream():
     st.session_state["ahc_centroids"] = None
     st.session_state["fcm_cntr"] = None
 
+    st.session_state["best_use_entropy"] = False
+    st.session_state["best_selected_features"] = None
+    st.session_state["best_model_cols"] = None
+    st.session_state["best_is_fcm"] = None
+
 def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, list]:
-    """
-    Return:
-      - mapping_dict: {col: {label: code_int}}
-      - errors: list of error strings (if any)
-    """
     mapping_dict: dict[str, dict] = {}
     errors: list[str] = []
 
@@ -209,7 +226,6 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
     st.caption("Atur angka untuk tiap label. Batas: 0 s/d (jumlah label - 1). Angka harus unik dalam satu kolom.")
 
     for col in cat_cols:
-        # ambil label unik (string), urutkan biar stabil
         raw_vals = df[col].astype(str).fillna("NaN")
         labels = sorted(raw_vals.unique().tolist())
         n_labels = len(labels)
@@ -221,7 +237,6 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
         st.markdown(f"#### Kolom: **{col}** (jumlah label: {n_labels})")
         st.markdown(f"<div class='hint'>Range angka yang boleh: 0 sampai {n_labels-1}</div>", unsafe_allow_html=True)
 
-        # default mapping: pakai mapping lama kalau ada, kalau tidak 0..n-1 sesuai urutan labels
         old_map = st.session_state.get("manual_maps", {}).get(col, {})
         used_defaults = []
         for i, lab in enumerate(labels):
@@ -229,7 +244,6 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
                 val = int(old_map[lab])
             else:
                 val = i
-            # pastikan masih dalam range
             if val < 0 or val > n_labels - 1:
                 val = i
             used_defaults.append(val)
@@ -237,7 +251,6 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
         col_map: dict[str, int] = {}
         picked_values = []
 
-        # UI input angka per label
         for i, lab in enumerate(labels):
             key = f"map::{col}::{lab}"
             val = st.number_input(
@@ -252,7 +265,6 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
             col_map[lab] = val
             picked_values.append(val)
 
-        # validasi unik
         if len(set(picked_values)) != len(picked_values):
             errors.append(f"Kolom '{col}' punya angka duplikat. Setiap label harus punya angka unik 0..{n_labels-1}.")
             st.markdown("<div class='warn'>❌ Ada angka duplikat! Harus unik untuk tiap label.</div>", unsafe_allow_html=True)
@@ -263,6 +275,385 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
         st.markdown("---")
 
     return mapping_dict, errors
+
+# ======================================================
+# ✅ Fitur Baru: Pipeline untuk data baru (input form)
+# ======================================================
+def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd.DataFrame:
+    """
+    Untuk 1 baris data baru:
+    - Jika strategi 'Hapus baris yang ada NaN' => jika ada NaN, kembalikan df kosong.
+    - Mean/median/modus diambil dari df_preprocessed (dataset hasil preprocessing) jika tersedia.
+    """
+    df_row = df_row.copy()
+    if df_row.shape[0] != 1:
+        return df_row
+
+    if strategy == "Biarkan (akan error jika ada NaN saat proses numeric)":
+        return df_row
+
+    if strategy == "Hapus baris yang ada NaN":
+        if df_row.isna().any(axis=None):
+            return df_row.dropna(axis=0)
+        return df_row
+
+    # referensi statistik dari dataset training yang sudah dipreprocess
+    ref = st.session_state.get("df_preprocessed", None)
+    if ref is None or ref.empty:
+        # fallback minimal
+        if strategy == "Isi NaN dengan 0 (untuk numerik)":
+            num_cols = df_row.select_dtypes(include=[np.number]).columns.tolist()
+            df_row[num_cols] = df_row[num_cols].fillna(0)
+        elif strategy == "Isi NaN dengan modus (untuk kategorikal & numerik)":
+            for c in df_row.columns:
+                if df_row[c].isna().any():
+                    df_row[c] = df_row[c].fillna(df_row[c].mode(dropna=True).iloc[0] if not df_row[c].mode(dropna=True).empty else 0)
+        return df_row
+
+    if strategy == "Isi NaN dengan 0 (untuk numerik)":
+        num_cols = df_row.select_dtypes(include=[np.number]).columns.tolist()
+        df_row[num_cols] = df_row[num_cols].fillna(0)
+
+    elif strategy == "Isi NaN dengan mean (untuk numerik)":
+        num_cols = df_row.columns.tolist()
+        for c in num_cols:
+            if df_row[c].isna().any():
+                if pd.api.types.is_numeric_dtype(ref[c]) if c in ref.columns else False:
+                    df_row[c] = df_row[c].fillna(ref[c].mean())
+                else:
+                    # kalau bukan numeric, isi modus
+                    try:
+                        df_row[c] = df_row[c].fillna(ref[c].mode(dropna=True).iloc[0])
+                    except Exception:
+                        pass
+
+    elif strategy == "Isi NaN dengan median (untuk numerik)":
+        num_cols = df_row.columns.tolist()
+        for c in num_cols:
+            if df_row[c].isna().any():
+                if pd.api.types.is_numeric_dtype(ref[c]) if c in ref.columns else False:
+                    df_row[c] = df_row[c].fillna(ref[c].median())
+                else:
+                    try:
+                        df_row[c] = df_row[c].fillna(ref[c].mode(dropna=True).iloc[0])
+                    except Exception:
+                        pass
+
+    elif strategy == "Isi NaN dengan modus (untuk kategorikal & numerik)":
+        for c in df_row.columns:
+            if df_row[c].isna().any():
+                try:
+                    df_row[c] = df_row[c].fillna(ref[c].mode(dropna=True).iloc[0])
+                except Exception:
+                    pass
+
+    return df_row
+
+def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, list]:
+    """
+    Output:
+      - df_new_pre: 1-row dataframe setelah drop/missing/manual map
+      - df_new_scaled: 1-row dataframe setelah scaling (kolom numeric_cols_fit)
+      - warnings: list string
+    """
+    warnings = []
+    df_raw = st.session_state.get("df_raw", None)
+    if df_raw is None:
+        return None, None, ["Dataset belum diupload."]
+
+    drop_cols = st.session_state.get("drop_cols", [])
+    manual_maps = st.session_state.get("manual_maps", {})
+    missing_strategy = st.session_state.get("missing_strategy", "Hapus baris yang ada NaN")
+    scaler = st.session_state.get("scaler", None)
+    numeric_cols_fit = st.session_state.get("numeric_cols_fit", [])
+
+    df_row = pd.DataFrame([raw_input])
+
+    # drop kolom sesuai preprocessing training
+    if drop_cols:
+        exist_drop = [c for c in drop_cols if c in df_row.columns]
+        if exist_drop:
+            df_row = df_row.drop(columns=exist_drop, errors="ignore")
+
+    # manual mapping untuk kolom kategorikal yang dulu dipilih
+    used_maps = {}
+    for c, cmap in manual_maps.items():
+        if c in df_row.columns:
+            df_row[c] = df_row[c].astype(str).map(cmap)
+            used_maps[c] = cmap
+
+    for c in used_maps.keys():
+        if df_row[c].isna().any():
+            warnings.append(f"Kolom '{c}' ada label yang tidak termapping. Nilai diisi -1.")
+            df_row[c] = df_row[c].fillna(-1)
+
+    # missing handling
+    df_row = apply_missing_strategy_single_row(df_row, missing_strategy)
+    if df_row.shape[0] == 0:
+        return None, None, [f"Data baru mengandung NaN dan strategi missing='{missing_strategy}', sehingga baris dihapus."]
+
+    # pastikan ada scaler dan kolom numeric fit
+    if scaler is None or not numeric_cols_fit:
+        return None, None, ["Scaler/kolom numerik belum siap. Jalankan Preprocessing dulu."]
+
+    # pastikan semua numeric_cols_fit ada
+    for c in numeric_cols_fit:
+        if c not in df_row.columns:
+            # jika kolom hilang (misal user kosongin), isi NaN dulu lalu missing handler lagi
+            df_row[c] = np.nan
+
+    # ubah ke numeric bila memungkinkan
+    for c in numeric_cols_fit:
+        df_row[c] = pd.to_numeric(df_row[c], errors="coerce")
+
+    # kalau muncul NaN karena coercion, tangani lagi
+    df_row = apply_missing_strategy_single_row(df_row, missing_strategy)
+    if df_row.shape[0] == 0:
+        return None, None, [f"Setelah konversi numeric, masih ada NaN dan strategi missing='{missing_strategy}', sehingga baris dihapus."]
+
+    # scaling sesuai training
+    X_new = scaler.transform(df_row[numeric_cols_fit])
+    df_scaled = pd.DataFrame(X_new, columns=numeric_cols_fit)
+
+    return df_row, df_scaled, warnings
+
+def explain_assignment_by_centroid(x: np.ndarray, centroids: np.ndarray, feature_names: list, top_k_reason: int = 5):
+    """
+    Alasan: cluster dipilih karena jarak terkecil.
+    Tambahkan fitur yang paling mendukung: fitur yang membuat x paling dekat dengan centroid cluster terpilih
+    dibanding rata-rata jarak ke centroid cluster lain.
+    """
+    # distances
+    dists = np.linalg.norm(centroids - x.reshape(1, -1), axis=1)
+    best_idx = int(np.argmin(dists))
+
+    # kontribusi per fitur (lebih informatif dibanding sekadar abs diff)
+    # score = (avg_absdiff_to_others) - (absdiff_to_best)
+    absdiff_best = np.abs(x - centroids[best_idx])
+    absdiff_others_avg = np.mean(np.abs(centroids - x.reshape(1, -1)), axis=0)
+    support = absdiff_others_avg - absdiff_best  # makin besar => makin mendukung cluster best
+
+    order = np.argsort(-support)  # descending
+    reasons = []
+    for i in order[:top_k_reason]:
+        reasons.append({
+            "Fitur": feature_names[i],
+            "Nilai(x)": float(x[i]),
+            "Centroid(cluster)": float(centroids[best_idx, i]),
+            "Selisih|x-centroid|": float(absdiff_best[i]),
+            "Skor Dukungan": float(support[i]),
+        })
+
+    return best_idx, dists, pd.DataFrame(reasons)
+
+def explain_assignment_by_fcm(x: np.ndarray, cntr: np.ndarray, feature_names: list, top_k_reason: int = 5):
+    """
+    Untuk FCM: hitung membership memakai cmeans_predict.
+    Alasan: membership terbesar.
+    Tambahkan alasan fitur: mirip centroid cluster terpilih, pakai logika support serupa.
+    """
+    u, u0, d, jm, p, fpc = fuzz.cluster.cmeans_predict(
+        x.reshape(-1, 1), cntr, m=2, error=0.005, maxiter=1000
+    )
+    # u shape: (c, N=1)
+    memberships = u[:, 0]
+    best_idx = int(np.argmax(memberships))
+
+    absdiff_best = np.abs(x - cntr[best_idx])
+    absdiff_others_avg = np.mean(np.abs(cntr - x.reshape(1, -1)), axis=0)
+    support = absdiff_others_avg - absdiff_best
+
+    order = np.argsort(-support)
+    reasons = []
+    for i in order[:top_k_reason]:
+        reasons.append({
+            "Fitur": feature_names[i],
+            "Nilai(x)": float(x[i]),
+            "Center(cluster)": float(cntr[best_idx, i]),
+            "Selisih|x-center|": float(absdiff_best[i]),
+            "Skor Dukungan": float(support[i]),
+        })
+
+    return best_idx, memberships, pd.DataFrame(reasons)
+
+def render_new_input_form():
+    st.markdown("### 🧾 Input Data Baru (Langsung di Website)")
+    st.caption("Isi data sesuai kolom Excel. Kolom yang dulu di-drop akan diabaikan otomatis. Kolom kategorikal akan muncul sebagai pilihan label.")
+
+    df_raw = st.session_state.get("df_raw", None)
+    if df_raw is None:
+        st.warning("Upload dataset Excel dulu.")
+        return
+
+    manual_maps = st.session_state.get("manual_maps", {})
+    drop_cols = st.session_state.get("drop_cols", [])
+    missing_strategy = st.session_state.get("missing_strategy", "")
+
+    best_method = st.session_state.get("best_method", None)
+    best_k = st.session_state.get("best_k", None)
+    if best_method is None or best_k is None:
+        st.warning("Jalankan Clustering dulu sampai metode terbaik terpilih.")
+        return
+
+    st.markdown("#### ⚙️ Pipeline yang digunakan untuk data baru")
+    st.markdown(f"- Metode optimal: **{best_method}** (k={best_k})")
+    st.markdown(f"- Missing strategy: **{missing_strategy}**")
+    if drop_cols:
+        st.markdown("- Drop kolom: " + " ".join([f"<span class='pill'>{c}</span>" for c in drop_cols]), unsafe_allow_html=True)
+    if manual_maps:
+        st.markdown("- Kategorikal (manual map): " + " ".join([f"<span class='pill'>{c}</span>" for c in manual_maps.keys()]), unsafe_allow_html=True)
+
+    # buat form input
+    with st.form("form_input_data_baru"):
+        raw_input = {}
+        cols = df_raw.columns.tolist()
+
+        # tampilkan 2 kolom layout biar rapi
+        col_left, col_right = st.columns(2)
+        for idx, c in enumerate(cols):
+            target_col = col_left if idx % 2 == 0 else col_right
+
+            with target_col:
+                # jika kolom di-drop, tetap tampilkan tapi kasih note bahwa akan diabaikan (opsional)
+                ignored = c in drop_cols
+                label = f"{c} (akan diabaikan)" if ignored else c
+
+                # kalau kolom ini termasuk yang punya mapping, tampilkan selectbox label
+                if c in manual_maps:
+                    # opsi label dari data asli (stabil dari mapping)
+                    options = list(manual_maps[c].keys())
+                    # default pilihan pertama
+                    pick = st.selectbox(label, options=options, index=0, key=f"new_{c}")
+                    raw_input[c] = pick
+                else:
+                    # tipe input: numeric jika kolom numeric di excel, else text
+                    if pd.api.types.is_numeric_dtype(df_raw[c]):
+                        val = st.number_input(label, value=float(df_raw[c].dropna().median()) if df_raw[c].dropna().shape[0] else 0.0, key=f"new_{c}")
+                        raw_input[c] = val
+                    else:
+                        val = st.text_input(label, value=str(df_raw[c].dropna().iloc[0]) if df_raw[c].dropna().shape[0] else "", key=f"new_{c}")
+                        # kosong => NaN
+                        raw_input[c] = val if val.strip() != "" else np.nan
+
+        submitted = st.form_submit_button("🔍 Proses & Tentukan Cluster")
+
+    if not submitted:
+        return
+
+    # preprocess data baru
+    df_new_pre, df_new_scaled, warns = preprocess_new_input(raw_input)
+    if warns:
+        for w in warns:
+            st.warning("⚠️ " + w)
+
+    if df_new_pre is None or df_new_scaled is None:
+        st.error("Gagal memproses data baru. Pastikan preprocessing & clustering sudah dijalankan dan input valid.")
+        return
+
+    st.markdown("#### ✅ Data baru setelah preprocessing (1 baris)")
+    st.dataframe(df_new_pre, use_container_width=True)
+
+    st.markdown("#### ✅ Data baru setelah normalisasi (0–1)")
+    st.dataframe(df_new_scaled, use_container_width=True)
+
+    # siapkan space model final
+    best_use_entropy = st.session_state.get("best_use_entropy", False)
+    best_model_cols = st.session_state.get("best_model_cols", None)  # kolom final
+    weights_entropy = st.session_state.get("weights_entropy", None)
+    feature_ranking = st.session_state.get("feature_ranking", None)
+    best_selected_features = st.session_state.get("best_selected_features", None)
+
+    if best_model_cols is None:
+        st.error("Model final belum menyimpan informasi kolom. Jalankan clustering ulang.")
+        return
+
+    # ambil fitur numeric sesuai scaler, lalu transform ke space entropy/subset jika dibutuhkan
+    x_space = df_new_scaled.copy()
+
+    # jika entropy dipakai, kalikan bobot pada kolom scaler-fit
+    if best_use_entropy:
+        if weights_entropy is None or feature_ranking is None:
+            st.error("Entropy weighting belum tersedia.")
+            return
+        # weights_entropy sesuai urutan kolom df_scaled training
+        # df_new_scaled kolomnya = numeric_cols_fit training, sama urutan
+        w = np.array(weights_entropy, dtype=float)
+        x_weighted = x_space.values * w.reshape(1, -1)
+        x_weighted_df = pd.DataFrame(x_weighted, columns=x_space.columns)
+
+        # kalau skenario entropy top-N, ambil fitur terpilih
+        if best_selected_features is not None:
+            x_final_df = x_weighted_df[best_selected_features].copy()
+        else:
+            x_final_df = x_weighted_df.copy()
+    else:
+        # tanpa entropy: pakai semua fitur numeric
+        x_final_df = x_space.copy()
+
+    # pastikan kolom sama dengan model final
+    missing_cols = [c for c in best_model_cols if c not in x_final_df.columns]
+    extra_cols = [c for c in x_final_df.columns if c not in best_model_cols]
+    if missing_cols:
+        for c in missing_cols:
+            x_final_df[c] = 0.0
+    if extra_cols:
+        x_final_df = x_final_df.drop(columns=extra_cols, errors="ignore")
+
+    x_final_df = x_final_df[best_model_cols]
+    x = x_final_df.values[0]
+
+    st.markdown("#### 🧠 Representasi final yang dipakai model (space input clustering)")
+    st.dataframe(x_final_df, use_container_width=True)
+
+    # prediksi cluster
+    best_is_fcm = st.session_state.get("best_is_fcm", None)
+    best_k = int(st.session_state["best_k"])
+
+    if best_is_fcm is None:
+        st.error("Info metode terbaik (FCM/AHC) belum tersimpan. Jalankan clustering ulang.")
+        return
+
+    if best_is_fcm:
+        cntr = st.session_state.get("fcm_cntr", None)
+        if cntr is None:
+            st.error("Center FCM belum tersedia. Pastikan metode terbaik adalah FCM dan clustering sudah dijalankan.")
+            return
+
+        best_idx, memberships, reasons_df = explain_assignment_by_fcm(
+            x=x, cntr=cntr, feature_names=best_model_cols, top_k_reason=5
+        )
+
+        st.success(f"✅ Data baru masuk ke **Cluster {best_idx + 1}** (berdasarkan membership tertinggi).")
+        st.write("**Membership tiap cluster:**")
+        mem_df = pd.DataFrame({
+            "Cluster": [i + 1 for i in range(best_k)],
+            "Membership": memberships
+        }).sort_values("Membership", ascending=False)
+        st.dataframe(mem_df, use_container_width=True)
+
+        st.write("**Alasan (fitur yang paling mendukung cluster terpilih):**")
+        st.dataframe(reasons_df, use_container_width=True)
+
+    else:
+        centroids = st.session_state.get("ahc_centroids", None)
+        if centroids is None:
+            st.error("Centroid AHC belum tersedia. Pastikan metode terbaik adalah AHC dan clustering sudah dijalankan.")
+            return
+
+        best_idx, dists, reasons_df = explain_assignment_by_centroid(
+            x=x, centroids=centroids, feature_names=best_model_cols, top_k_reason=5
+        )
+
+        st.success(f"✅ Data baru masuk ke **Cluster {best_idx + 1}** (jarak ke centroid paling kecil).")
+        dist_df = pd.DataFrame({
+            "Cluster": [i + 1 for i in range(best_k)],
+            "Jarak ke centroid": dists
+        }).sort_values("Jarak ke centroid", ascending=True)
+        st.write("**Jarak ke centroid tiap cluster:**")
+        st.dataframe(dist_df, use_container_width=True)
+
+        st.write("**Alasan (fitur yang paling mendukung cluster terpilih):**")
+        st.dataframe(reasons_df, use_container_width=True)
 
 # ======================================================
 # Menu Navigasi
@@ -392,7 +783,6 @@ if selected == "Preprocessing":
         st.write("### 3) Kolom Kategorikal yang Mau Di-Encode (Manual)")
         has_categorical = st.radio("Apakah ada kolom kategorikal (teks/kategori)?", ["Tidak", "Ya"], horizontal=True)
 
-        # tentukan kandidat kolom kategorikal (object/category/bool)
         candidate_cat = [c for c in df.columns if str(df[c].dtype) in ["object", "category", "bool"]]
         cat_cols = []
 
@@ -407,7 +797,6 @@ if selected == "Preprocessing":
 
         st.markdown("---")
 
-        # UI mapping manual (dibangun dari df yang masih asli)
         manual_maps, map_errors = build_manual_mapping_ui(df, cat_cols) if has_categorical == "Ya" else ({}, [])
 
         st.write("### 4) Jalankan Preprocessing")
@@ -422,7 +811,6 @@ if selected == "Preprocessing":
 
             work = df.copy()
 
-            # drop columns
             if drop_cols:
                 work = work.drop(columns=drop_cols, errors="ignore")
 
@@ -450,22 +838,17 @@ if selected == "Preprocessing":
                             pass
 
             # Manual Encoding
-            # mapping dibuat dari df asli; pastikan kita encode kolom yang masih ada setelah drop
             used_maps = {}
             for c, cmap in manual_maps.items():
                 if c in work.columns:
-                    # map berdasarkan string
                     work[c] = work[c].astype(str).map(cmap)
                     used_maps[c] = cmap
 
-            # Validasi: kalau ada nilai yang jadi NaN gara-gara label baru (misal ada NaN asli / label belum termap)
-            # isi dengan -1 lalu warning (biar tidak crash)
             for c in used_maps.keys():
                 if work[c].isna().any():
                     st.warning(f"⚠️ Kolom '{c}' ada label yang tidak termapping. Nilai tersebut akan diisi -1.")
                     work[c] = work[c].fillna(-1)
 
-            # ambil kolom numerik untuk modeling
             numeric_cols = work.select_dtypes(include=[np.number]).columns.tolist()
             if len(numeric_cols) == 0:
                 st.error("❌ Tidak ada kolom numerik untuk diproses. Pastikan ada kolom numerik atau lakukan encoding.")
@@ -475,7 +858,10 @@ if selected == "Preprocessing":
             st.session_state["drop_cols"] = drop_cols
             st.session_state["cat_cols"] = cat_cols
             st.session_state["manual_maps"] = used_maps
-            st.session_state["encoders"] = {}  # kosongkan karena kita pakai manual map
+            st.session_state["encoders"] = {}
+
+            st.session_state["missing_strategy"] = missing_strategy
+            st.session_state["numeric_cols_fit"] = numeric_cols
 
             scaler = MinMaxScaler()
             X_norm = scaler.fit_transform(work[numeric_cols])
@@ -485,7 +871,6 @@ if selected == "Preprocessing":
             st.session_state["scaler"] = scaler
             st.session_state["status_preprocess_ok"] = True
 
-            # reset downstream
             st.session_state["weights_entropy"] = None
             st.session_state["df_entropy_weighted"] = None
             st.session_state["feature_ranking"] = None
@@ -499,6 +884,11 @@ if selected == "Preprocessing":
             st.session_state["cluster_summary_best"] = None
             st.session_state["ahc_centroids"] = None
             st.session_state["fcm_cntr"] = None
+
+            st.session_state["best_use_entropy"] = False
+            st.session_state["best_selected_features"] = None
+            st.session_state["best_model_cols"] = None
+            st.session_state["best_is_fcm"] = None
 
             st.success("✅ Preprocessing selesai. Hasil ditampilkan di bawah.")
 
@@ -617,7 +1007,6 @@ if selected == "Clustering":
 
         range_n_clusters = range(int(k_min), int(k_max) + 1)
 
-        # pastikan entropy tersedia
         if st.session_state.get("df_entropy_weighted") is None or st.session_state.get("feature_ranking") is None:
             weights_entropy = entropy_weighting(df_scaled.values)
             feature_ranking = pd.DataFrame({
@@ -749,6 +1138,18 @@ if selected == "Clustering":
             X_use = chosen_scenario["X"]
             is_fcm = chosen_scenario["is_fcm"]
 
+            # simpan konfigurasi space model final (untuk data baru)
+            if "Dengan Seleksi Fitur" in best_method:
+                st.session_state["best_use_entropy"] = True
+                st.session_state["best_selected_features"] = selected_features
+                st.session_state["best_model_cols"] = selected_features
+            else:
+                st.session_state["best_use_entropy"] = False
+                st.session_state["best_selected_features"] = None
+                st.session_state["best_model_cols"] = df_scaled.columns.tolist()
+
+            st.session_state["best_is_fcm"] = bool(is_fcm)
+
             if not is_fcm:
                 model_final = AgglomerativeClustering(n_clusters=best_k, linkage="ward")
                 labels_best = model_final.fit_predict(X_use)
@@ -799,6 +1200,7 @@ if selected == "Clustering":
                 mime="text/csv"
             )
 
+            # Simpan pusat cluster untuk prediksi data baru
             if "AHC" in best_method:
                 centroids = np.array([X_use[labels_best == i].mean(axis=0) for i in range(best_k)])
                 st.session_state["ahc_centroids"] = centroids
@@ -806,6 +1208,10 @@ if selected == "Clustering":
             else:
                 st.session_state["fcm_cntr"] = cntr_best
                 st.session_state["ahc_centroids"] = None
+
+        # ✅ Fitur Baru: input data baru + prediksi cluster + alasan
+        st.markdown("---")
+        render_new_input_form()
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -818,4 +1224,3 @@ st.markdown("""
     © 2025 — Klasterisasi (By Fahrurrohman Ibnu Irsad Argyanto)
 </div>
 """, unsafe_allow_html=True)
-
