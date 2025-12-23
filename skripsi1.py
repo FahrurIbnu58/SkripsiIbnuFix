@@ -279,24 +279,28 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
     return mapping_dict, errors
 
 # ======================================================
-# ✅ Tambahan kecil: format ribuan (Indonesia) pakai titik
+# ✅ Format ribuan (Indonesia) pakai titik
 # ======================================================
 def format_ribuan_titik(s: str) -> str:
-    """
-    Input bisa angka string (mis. '1000000') atau sudah ada titik.
-    Output: '1.000.000'. Kalau kosong -> '0'
-    """
     if s is None:
         return "0"
     s = str(s).strip()
     if s == "":
         return "0"
-    # buang semua selain digit
     digits = "".join(ch for ch in s if ch.isdigit())
     if digits == "":
         return "0"
     n = int(digits)
     return f"{n:,}".replace(",", ".")
+
+# ======================================================
+# ✅ Tambahan helper: angka-only (ambil digit saja)
+# ======================================================
+def digits_only(s: str) -> str:
+    if s is None:
+        return ""
+    s = str(s)
+    return "".join(ch for ch in s if ch.isdigit())
 
 def is_special_numeric(colname: str) -> bool:
     s = str(colname).strip().lower()
@@ -312,7 +316,7 @@ def is_jml_naker(colname: str) -> bool:
     return ("jml_naker" in s) or ("jml naker" in s) or ("jumlah naker" in s)
 
 # ======================================================
-# ✅ Pipeline untuk data baru (input form)
+# Pipeline untuk data baru (input form)
 # ======================================================
 def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd.DataFrame:
     df_row = df_row.copy()
@@ -417,10 +421,7 @@ def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, l
         if c not in df_row.columns:
             df_row[c] = np.nan
 
-    # ======================================================
-    # ✅ Perbaikan tambahan: kolom special numeric boleh berisi titik pemisah ribuan
-    # (aset/omzet) atau input string angka. Hilangkan titik/koma sebelum to_numeric.
-    # ======================================================
+    # kolom special numeric boleh berisi titik/koma pemisah ribuan
     for c in numeric_cols_fit:
         if c in df_row.columns and is_special_numeric(c):
             df_row[c] = df_row[c].astype(str).str.replace(".", "", regex=False).str.replace(",", "", regex=False)
@@ -544,6 +545,9 @@ def append_new_row_to_excel(raw_input: dict, cluster_no: int) -> tuple[bytes, st
     out_name = file_name.replace(".xlsx", "_updated.xlsx")
     return bio.getvalue(), out_name
 
+# ======================================================
+# ✅ PERBAIKAN UTAMA: input angka-only & auto-format aset/omzet
+# ======================================================
 def render_new_input_form():
     st.markdown("### 🧾 Tambah Data")
     st.caption("Isi data sesuai kolom Excel. Kolom yang dulu di-drop akan diabaikan otomatis. Kolom kategorikal akan muncul sebagai pilihan label.")
@@ -587,37 +591,49 @@ def render_new_input_form():
                     raw_input[c] = pick
                 else:
                     if pd.api.types.is_numeric_dtype(df_raw[c]):
-                        # ======================================================
-                        # ✅ Perbaikan tambahan:
-                        # - Kolom lama usaha, tahun, kemitraan, aset, omzet, jml_naker:
-                        #   tampilan default sebelum input = "0"
-                        # - jml_naker: tetap tanpa koma-komaan (pakai text_input)
-                        # - aset & omzet: boleh ada titik tiap 3 digit (format Indonesia)
-                        # ======================================================
+
+                        # ====== SPECIAL NUMERIC: angka-only, aset/omzet auto format ribuan titik ======
                         if is_special_numeric(c):
-                            default_txt = "0"
+                            key_txt = f"newtxt_{c}"
+
+                            # aset/omzet: auto format 1.000.000 saat mengetik (angka-only)
                             if is_aset_omzet(c):
-                                # default tampil "0" (sudah sesuai), dan user boleh mengetik 1000000 atau 1.000.000
-                                default_txt = "0"
+                                if key_txt not in st.session_state:
+                                    st.session_state[key_txt] = "0"
+
                                 txt = st.text_input(
                                     label,
-                                    value=default_txt,
-                                    key=f"newtxt_{c}",
-                                    help="Masukkan angka. Untuk ribuan boleh pakai titik, contoh: 1.000.000"
+                                    value=st.session_state[key_txt],
+                                    key=key_txt,
+                                    help="Angka saja. Otomatis diformat ribuan pakai titik (contoh: 1.000.000)."
                                 )
-                                txt = txt.strip()
-                                # simpan string apa adanya (nanti dibersihkan di preprocess_new_input)
-                                raw_input[c] = np.nan if txt == "" else txt
+                                cleaned = digits_only(txt)
+                                formatted = format_ribuan_titik(cleaned) if cleaned != "" else "0"
+
+                                if txt != formatted:
+                                    st.session_state[key_txt] = formatted
+
+                                raw_input[c] = np.nan if cleaned == "" else formatted
+
+                            # lama usaha/tahun/kemitraan/jml_naker: angka-only tanpa format
                             else:
-                                # lama usaha, tahun, kemitraan, jml_naker: no format titik/koma, tampil default '0'
+                                if key_txt not in st.session_state:
+                                    st.session_state[key_txt] = "0"
+
                                 txt = st.text_input(
                                     label,
-                                    value=default_txt,
-                                    key=f"newtxt_{c}",
-                                    help="Masukkan angka tanpa koma."
+                                    value=st.session_state[key_txt],
+                                    key=key_txt,
+                                    help="Angka saja (tanpa koma/titik)."
                                 )
-                                txt = txt.strip()
-                                raw_input[c] = np.nan if txt == "" else txt
+                                cleaned = digits_only(txt)
+
+                                if txt != cleaned:
+                                    st.session_state[key_txt] = cleaned if cleaned != "" else "0"
+
+                                raw_input[c] = np.nan if cleaned == "" else cleaned
+
+                        # ====== numeric biasa: number_input seperti sebelumnya ======
                         else:
                             val = st.number_input(
                                 label,
@@ -690,8 +706,6 @@ def render_new_input_form():
 
     x_final_df = x_final_df[best_model_cols]
     x = x_final_df.values[0]
-
-    # (Tampilan representasi final tetap dihapus)
 
     best_is_fcm = st.session_state.get("best_is_fcm", None)
     best_k = int(st.session_state["best_k"])
