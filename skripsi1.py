@@ -291,6 +291,7 @@ def format_ribuan_titik(s: str) -> str:
     s = str(s).strip()
     if s == "":
         return "0"
+    # buang semua selain digit
     digits = "".join(ch for ch in s if ch.isdigit())
     if digits == "":
         return "0"
@@ -309,6 +310,23 @@ def is_aset_omzet(colname: str) -> bool:
 def is_jml_naker(colname: str) -> bool:
     s = str(colname).strip().lower()
     return ("jml_naker" in s) or ("jml naker" in s) or ("jumlah naker" in s)
+
+# ======================================================
+# ✅ FIX: angka-only + auto-format ribuan untuk aset/omzet
+# (callback TIDAK BOLEH di dalam st.form)
+# ======================================================
+def _digits_only(s: str) -> str:
+    if s is None:
+        return ""
+    return "".join(ch for ch in str(s) if ch.isdigit())
+
+def on_change_format_ribuan(key: str):
+    raw = st.session_state.get(key, "")
+    digits = _digits_only(raw)
+    if digits == "":
+        st.session_state[key] = "0"
+    else:
+        st.session_state[key] = format_ribuan_titik(digits)
 
 # ======================================================
 # ✅ Pipeline untuk data baru (input form)
@@ -416,7 +434,10 @@ def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, l
         if c not in df_row.columns:
             df_row[c] = np.nan
 
-    # ✅ Kolom special numeric boleh ada titik/koma pemisah, dibersihkan sebelum to_numeric
+    # ======================================================
+    # ✅ Perbaikan tambahan: kolom special numeric boleh berisi titik pemisah ribuan
+    # (aset/omzet) atau input string angka. Hilangkan titik/koma sebelum to_numeric.
+    # ======================================================
     for c in numeric_cols_fit:
         if c in df_row.columns and is_special_numeric(c):
             df_row[c] = df_row[c].astype(str).str.replace(".", "", regex=False).str.replace(",", "", regex=False)
@@ -541,26 +562,8 @@ def append_new_row_to_excel(raw_input: dict, cluster_no: int) -> tuple[bytes, st
     return bio.getvalue(), out_name
 
 # ======================================================
-# ✅ PERBAIKAN: formatter input aset/omzet (auto titik saat mengetik)
+# ✅ FIXED Tambah Data: tanpa st.form (agar on_change boleh)
 # ======================================================
-def _digits_only(s: str) -> str:
-    if s is None:
-        return ""
-    return "".join(ch for ch in str(s) if ch.isdigit())
-
-def on_change_format_ribuan(key: str):
-    """
-    Callback untuk st.text_input aset/omzet:
-    - paksa hanya digit
-    - format ribuan dengan titik
-    """
-    raw = st.session_state.get(key, "")
-    digits = _digits_only(raw)
-    if digits == "":
-        st.session_state[key] = "0"
-        return
-    st.session_state[key] = format_ribuan_titik(digits)
-
 def render_new_input_form():
     st.markdown("### 🧾 Tambah Data")
     st.caption("Isi data sesuai kolom Excel. Kolom yang dulu di-drop akan diabaikan otomatis. Kolom kategorikal akan muncul sebagai pilihan label.")
@@ -586,81 +589,81 @@ def render_new_input_form():
     if manual_maps:
         st.markdown("- Kategorikal (manual map): " + " ".join([f"<span class='pill'>{c}</span>" for c in manual_maps.keys()]), unsafe_allow_html=True)
 
-    with st.form("form_input_data_baru"):
-        raw_input = {}
-        cols = df_raw.columns.tolist()
+    raw_cols = df_raw.columns.tolist()
+    col_left, col_right = st.columns(2)
 
-        col_left, col_right = st.columns(2)
-        for idx, c in enumerate(cols):
-            target_col = col_left if idx % 2 == 0 else col_right
+    # Render widgets (tanpa form)
+    for idx, c in enumerate(raw_cols):
+        target_col = col_left if idx % 2 == 0 else col_right
+        with target_col:
+            ignored = c in drop_cols
+            label = f"{c} (akan diabaikan)" if ignored else c
 
-            with target_col:
-                ignored = c in drop_cols
-                label = f"{c} (akan diabaikan)" if ignored else c
+            if c in manual_maps:
+                options = list(manual_maps[c].keys())
+                st.selectbox(label, options=options, index=0, key=f"new_{c}")
+            else:
+                if pd.api.types.is_numeric_dtype(df_raw[c]):
 
-                if c in manual_maps:
-                    options = list(manual_maps[c].keys())
-                    pick = st.selectbox(label, options=options, index=0, key=f"new_{c}")
-                    raw_input[c] = pick
-                else:
-                    if pd.api.types.is_numeric_dtype(df_raw[c]):
-
-                        # ======================================================
-                        # ✅ PERBAIKAN DI SINI:
-                        # - lama usaha/tahun/kemitraan/jml_naker: angka saja (number_input integer)
-                        # - aset & omzet: angka saja, tapi auto format ribuan '.' saat mengetik
-                        # ======================================================
-                        if is_special_numeric(c):
-
-                            if is_aset_omzet(c):
-                                # aset/omzet: text_input tapi dipaksa digit dan auto-format ribuan (.)
-                                key_txt = f"newtxt_{c}"
-                                # set default session state kalau belum ada
-                                st.session_state.setdefault(key_txt, "0")
-
-                                st.text_input(
-                                    label,
-                                    value=st.session_state[key_txt],
-                                    key=key_txt,
-                                    on_change=on_change_format_ribuan,
-                                    args=(key_txt,),
-                                    help="Masukkan angka. Akan otomatis diformat ribuan dengan titik, contoh: 1.000.000"
-                                )
-                                # simpan sebagai angka (int) ke raw_input
-                                digits = _digits_only(st.session_state.get(key_txt, "0"))
-                                raw_input[c] = int(digits) if digits != "" else 0
-
-                            else:
-                                # lama usaha, tahun, kemitraan, jml_naker: wajib angka integer
-                                val_int = st.number_input(
-                                    label,
-                                    min_value=0,
-                                    value=0,
-                                    step=1,
-                                    key=f"newint_{c}",
-                                    help="Wajib angka (integer)."
-                                )
-                                raw_input[c] = int(val_int)
-
-                        else:
-                            val = st.number_input(
+                    if is_special_numeric(c):
+                        if is_aset_omzet(c):
+                            # aset/omzet: angka-only, auto-format ribuan titik saat user mengetik (via on_change)
+                            key_txt = f"newtxt_{c}"
+                            st.session_state.setdefault(key_txt, "0")
+                            st.text_input(
                                 label,
-                                value=float(df_raw[c].dropna().median()) if df_raw[c].dropna().shape[0] else 0.0,
-                                key=f"new_{c}"
+                                value=st.session_state[key_txt],
+                                key=key_txt,
+                                on_change=on_change_format_ribuan,
+                                args=(key_txt,),
+                                help="Masukkan angka. Akan otomatis diformat ribuan dengan titik, contoh: 1.000.000"
                             )
-                            raw_input[c] = val
+                        else:
+                            # lama usaha / tahun / kemitraan / jml_naker: angka saja (integer)
+                            st.number_input(
+                                label,
+                                min_value=0,
+                                value=0,
+                                step=1,
+                                key=f"newint_{c}",
+                                help="Wajib angka (integer)."
+                            )
                     else:
-                        val = st.text_input(
+                        st.number_input(
                             label,
-                            value=str(df_raw[c].dropna().iloc[0]) if df_raw[c].dropna().shape[0] else "",
+                            value=float(df_raw[c].dropna().median()) if df_raw[c].dropna().shape[0] else 0.0,
                             key=f"new_{c}"
                         )
-                        raw_input[c] = val if val.strip() != "" else np.nan
+                else:
+                    st.text_input(
+                        label,
+                        value=str(df_raw[c].dropna().iloc[0]) if df_raw[c].dropna().shape[0] else "",
+                        key=f"new_{c}"
+                    )
 
-        submitted = st.form_submit_button("🔍 Proses & Tentukan Cluster")
-
+    submitted = st.button("🔍 Proses & Tentukan Cluster")
     if not submitted:
         return
+
+    # Build raw_input dari session_state
+    raw_input = {}
+    for c in raw_cols:
+        if c in manual_maps:
+            raw_input[c] = st.session_state.get(f"new_{c}")
+        else:
+            if pd.api.types.is_numeric_dtype(df_raw[c]):
+                if is_special_numeric(c):
+                    if is_aset_omzet(c):
+                        key_txt = f"newtxt_{c}"
+                        digits = _digits_only(st.session_state.get(key_txt, "0"))
+                        raw_input[c] = int(digits) if digits != "" else 0
+                    else:
+                        raw_input[c] = int(st.session_state.get(f"newint_{c}", 0))
+                else:
+                    raw_input[c] = st.session_state.get(f"new_{c}", 0.0)
+            else:
+                val = st.session_state.get(f"new_{c}", "")
+                raw_input[c] = val if str(val).strip() != "" else np.nan
 
     df_new_pre, df_new_scaled, warns = preprocess_new_input(raw_input)
     if warns:
