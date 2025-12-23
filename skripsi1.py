@@ -163,18 +163,16 @@ def ensure_session_defaults():
     st.session_state.setdefault("df_clustered", None)
     st.session_state.setdefault("cluster_summary_best", None)
 
-    st.session_state.setdefault("ahc_centroids", None)  # centroid pada space final yang dipakai (bisa subset)
-    st.session_state.setdefault("fcm_cntr", None)       # center pada space final yang dipakai (bisa subset)
+    st.session_state.setdefault("ahc_centroids", None)
+    st.session_state.setdefault("fcm_cntr", None)
 
     st.session_state.setdefault("data_fingerprint", None)
 
-    # untuk prediksi data baru
     st.session_state.setdefault("best_use_entropy", False)
-    st.session_state.setdefault("best_selected_features", None)  # list fitur (jika entropy topN dipakai)
-    st.session_state.setdefault("best_model_cols", None)         # kolom yang jadi input model final
+    st.session_state.setdefault("best_selected_features", None)
+    st.session_state.setdefault("best_model_cols", None)
     st.session_state.setdefault("best_is_fcm", None)
 
-    # simpan file upload untuk re-download excel setelah tambah data
     st.session_state.setdefault("uploaded_excel_bytes", None)
     st.session_state.setdefault("uploaded_excel_name", None)
 
@@ -281,14 +279,42 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
     return mapping_dict, errors
 
 # ======================================================
+# ✅ Tambahan kecil: format ribuan (Indonesia) pakai titik
+# ======================================================
+def format_ribuan_titik(s: str) -> str:
+    """
+    Input bisa angka string (mis. '1000000') atau sudah ada titik.
+    Output: '1.000.000'. Kalau kosong -> '0'
+    """
+    if s is None:
+        return "0"
+    s = str(s).strip()
+    if s == "":
+        return "0"
+    # buang semua selain digit
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if digits == "":
+        return "0"
+    n = int(digits)
+    return f"{n:,}".replace(",", ".")
+
+def is_special_numeric(colname: str) -> bool:
+    s = str(colname).strip().lower()
+    keys = ["lama usaha", "tahun", "kemitraan", "aset", "omzet", "jml_naker", "jml naker", "jumlah naker"]
+    return any(k in s for k in keys)
+
+def is_aset_omzet(colname: str) -> bool:
+    s = str(colname).strip().lower()
+    return ("aset" in s) or ("omzet" in s)
+
+def is_jml_naker(colname: str) -> bool:
+    s = str(colname).strip().lower()
+    return ("jml_naker" in s) or ("jml naker" in s) or ("jumlah naker" in s)
+
+# ======================================================
 # ✅ Pipeline untuk data baru (input form)
 # ======================================================
 def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd.DataFrame:
-    """
-    Untuk 1 baris data baru:
-    - Jika strategi 'Hapus baris yang ada NaN' => jika ada NaN, kembalikan df kosong.
-    - Mean/median/modus diambil dari df_preprocessed (dataset hasil preprocessing) jika tersedia.
-    """
     df_row = df_row.copy()
     if df_row.shape[0] != 1:
         return df_row
@@ -351,12 +377,6 @@ def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd
     return df_row
 
 def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, list]:
-    """
-    Output:
-      - df_new_pre: 1-row dataframe setelah drop/missing/manual map
-      - df_new_scaled: 1-row dataframe setelah scaling (kolom numeric_cols_fit)
-      - warnings: list string
-    """
     warnings = []
     df_raw = st.session_state.get("df_raw", None)
     if df_raw is None:
@@ -396,6 +416,14 @@ def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, l
     for c in numeric_cols_fit:
         if c not in df_row.columns:
             df_row[c] = np.nan
+
+    # ======================================================
+    # ✅ Perbaikan tambahan: kolom special numeric boleh berisi titik pemisah ribuan
+    # (aset/omzet) atau input string angka. Hilangkan titik/koma sebelum to_numeric.
+    # ======================================================
+    for c in numeric_cols_fit:
+        if c in df_row.columns and is_special_numeric(c):
+            df_row[c] = df_row[c].astype(str).str.replace(".", "", regex=False).str.replace(",", "", regex=False)
 
     for c in numeric_cols_fit:
         df_row[c] = pd.to_numeric(df_row[c], errors="coerce")
@@ -454,14 +482,7 @@ def explain_assignment_by_fcm(x: np.ndarray, cntr: np.ndarray, feature_names: li
 
     return best_idx, memberships, pd.DataFrame(reasons)
 
-# ======================================================
-# ✅ Tambahan: ringkasan alasan ala "Rekapitulasi Hasil Clustering"
-# ======================================================
 def build_cluster_like_recap(cluster_no: int) -> pd.DataFrame:
-    """
-    Menampilkan ringkasan untuk 1 cluster (min–max numerik + distribusi izin jika ada),
-    sama gaya informasinya dengan 'Rekapitulasi Hasil Clustering (Metode Terpilih)'.
-    """
     df_hasil = st.session_state.get("df_clustered", None)
     if df_hasil is None or df_hasil.empty or "Cluster" not in df_hasil.columns:
         return pd.DataFrame()
@@ -493,10 +514,6 @@ def build_cluster_like_recap(cluster_no: int) -> pd.DataFrame:
     return df_summary
 
 def append_new_row_to_excel(raw_input: dict, cluster_no: int) -> tuple[bytes, str]:
-    """
-    Tambahkan 1 baris data baru ke df_raw (kolom asli), lalu sediakan file excel untuk download.
-    Tidak mengubah perhitungan model (hanya update file).
-    """
     df_raw = st.session_state.get("df_raw", None)
     sheet_name = st.session_state.get("sheet_name", "Sheet1")
     if df_raw is None:
@@ -514,8 +531,6 @@ def append_new_row_to_excel(raw_input: dict, cluster_no: int) -> tuple[bytes, st
             new_row[c] = raw_input.get(c, np.nan)
 
     df_out = pd.concat([df_out, pd.DataFrame([new_row])], ignore_index=True)
-
-    # simpan balik ke session_state juga, biar "dataset yang diinputkan sebelumnya" ikut bertambah
     st.session_state["df_raw"] = df_out
 
     bio = io.BytesIO()
@@ -554,16 +569,6 @@ def render_new_input_form():
     if manual_maps:
         st.markdown("- Kategorikal (manual map): " + " ".join([f"<span class='pill'>{c}</span>" for c in manual_maps.keys()]), unsafe_allow_html=True)
 
-    # ======================================================
-    # ✅ Perbaikan #3: untuk kolom tertentu, gunakan text_input (tanpa koma otomatis)
-    # ======================================================
-    special_numeric_keywords = [
-        "lama usaha", "tahun", "kemitraan", "aset", "omzet", "jml naker", "jumlah naker"
-    ]
-    def is_special_numeric(colname: str) -> bool:
-        s = str(colname).strip().lower()
-        return any(k in s for k in special_numeric_keywords)
-
     with st.form("form_input_data_baru"):
         raw_input = {}
         cols = df_raw.columns.tolist()
@@ -582,16 +587,37 @@ def render_new_input_form():
                     raw_input[c] = pick
                 else:
                     if pd.api.types.is_numeric_dtype(df_raw[c]):
+                        # ======================================================
+                        # ✅ Perbaikan tambahan:
+                        # - Kolom lama usaha, tahun, kemitraan, aset, omzet, jml_naker:
+                        #   tampilan default sebelum input = "0"
+                        # - jml_naker: tetap tanpa koma-komaan (pakai text_input)
+                        # - aset & omzet: boleh ada titik tiap 3 digit (format Indonesia)
+                        # ======================================================
                         if is_special_numeric(c):
-                            default_val = df_raw[c].dropna().median() if df_raw[c].dropna().shape[0] else 0
-                            txt = st.text_input(
-                                label,
-                                value=str(int(default_val)) if float(default_val).is_integer() else str(default_val),
-                                key=f"newtxt_{c}",
-                                help="Masukkan angka tanpa tanda koma."
-                            )
-                            txt = txt.strip()
-                            raw_input[c] = np.nan if txt == "" else txt  # nanti dicoerce di preprocess_new_input
+                            default_txt = "0"
+                            if is_aset_omzet(c):
+                                # default tampil "0" (sudah sesuai), dan user boleh mengetik 1000000 atau 1.000.000
+                                default_txt = "0"
+                                txt = st.text_input(
+                                    label,
+                                    value=default_txt,
+                                    key=f"newtxt_{c}",
+                                    help="Masukkan angka. Untuk ribuan boleh pakai titik, contoh: 1.000.000"
+                                )
+                                txt = txt.strip()
+                                # simpan string apa adanya (nanti dibersihkan di preprocess_new_input)
+                                raw_input[c] = np.nan if txt == "" else txt
+                            else:
+                                # lama usaha, tahun, kemitraan, jml_naker: no format titik/koma, tampil default '0'
+                                txt = st.text_input(
+                                    label,
+                                    value=default_txt,
+                                    key=f"newtxt_{c}",
+                                    help="Masukkan angka tanpa koma."
+                                )
+                                txt = txt.strip()
+                                raw_input[c] = np.nan if txt == "" else txt
                         else:
                             val = st.number_input(
                                 label,
@@ -612,7 +638,6 @@ def render_new_input_form():
     if not submitted:
         return
 
-    # preprocess data baru
     df_new_pre, df_new_scaled, warns = preprocess_new_input(raw_input)
     if warns:
         for w in warns:
@@ -666,12 +691,8 @@ def render_new_input_form():
     x_final_df = x_final_df[best_model_cols]
     x = x_final_df.values[0]
 
-    # ======================================================
-    # ✅ Perbaikan #1: Hapus tampilan "Representasi final yang dipakai model (space input clustering)"
-    # (Bagian ini sengaja dihilangkan)
-    # ======================================================
+    # (Tampilan representasi final tetap dihapus)
 
-    # prediksi cluster
     best_is_fcm = st.session_state.get("best_is_fcm", None)
     best_k = int(st.session_state["best_k"])
 
@@ -685,7 +706,7 @@ def render_new_input_form():
             st.error("Center FCM belum tersedia. Pastikan metode terbaik adalah FCM dan clustering sudah dijalankan.")
             return
 
-        best_idx, memberships, _reasons_df = explain_assignment_by_fcm(
+        best_idx, memberships, _ = explain_assignment_by_fcm(
             x=x, cntr=cntr, feature_names=best_model_cols, top_k_reason=5
         )
 
@@ -703,7 +724,7 @@ def render_new_input_form():
             st.error("Centroid AHC belum tersedia. Pastikan metode terbaik adalah AHC dan clustering sudah dijalankan.")
             return
 
-        best_idx, dists, _reasons_df = explain_assignment_by_centroid(
+        best_idx, dists, _ = explain_assignment_by_centroid(
             x=x, centroids=centroids, feature_names=best_model_cols, top_k_reason=5
         )
 
@@ -715,9 +736,6 @@ def render_new_input_form():
         st.write("**Jarak ke centroid tiap cluster:**")
         st.dataframe(dist_df, use_container_width=True)
 
-    # ======================================================
-    # ✅ Perbaikan #2: Ganti isi "Alasan..." menjadi seperti rekapitulasi hasil clustering
-    # ======================================================
     st.write("**Alasan (ringkasan cluster terpilih):**")
     recap_one = build_cluster_like_recap(best_idx + 1)
     if recap_one.empty:
@@ -725,9 +743,6 @@ def render_new_input_form():
     else:
         st.dataframe(recap_one, use_container_width=True)
 
-    # ======================================================
-    # ✅ Perbaikan #5: Setelah menambahkan data, masukkan ke excel lagi & bisa di-download
-    # ======================================================
     excel_bytes, out_name = append_new_row_to_excel(raw_input=raw_input, cluster_no=best_idx + 1)
     if excel_bytes is not None:
         st.download_button(
@@ -740,7 +755,6 @@ def render_new_input_form():
 # ======================================================
 # Menu Navigasi
 # ======================================================
-# ✅ Perbaikan #4: Pindah fitur tambah data baru ke navigasi (setelah Clustering)
 selected = option_menu(
     menu_title=None,
     options=["Description", "Preprocessing", "Entropy Weighting", "Clustering", "Tambah Data"],
@@ -771,7 +785,6 @@ with st.sidebar:
 
     if uploaded is not None:
         try:
-            # simpan bytes & nama file untuk kebutuhan download updated excel
             st.session_state["uploaded_excel_bytes"] = uploaded.getvalue()
             st.session_state["uploaded_excel_name"] = uploaded.name
 
@@ -1295,7 +1308,7 @@ if selected == "Clustering":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# ✅ Perbaikan #4: Halaman Tambah Data dipindahkan ke menu navigasi
+# Tambah Data (menu navigasi)
 # ======================================================
 if selected == "Tambah Data":
     with st.container():
