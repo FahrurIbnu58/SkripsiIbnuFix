@@ -477,7 +477,7 @@ def explain_assignment_by_fcm(x: np.ndarray, cntr: np.ndarray, feature_names: li
     return best_idx, memberships, pd.DataFrame(reasons)
 
 def render_new_input_form():
-    st.markdown("### 🧾 Input Data Baru (Langsung di Website)")
+    st.markdown("### 🧾 Tambah Data")
     st.caption("Isi data sesuai kolom Excel. Kolom yang dulu di-drop akan diabaikan otomatis. Kolom kategorikal akan muncul sebagai pilihan label.")
 
     df_raw = st.session_state.get("df_raw", None)
@@ -495,9 +495,8 @@ def render_new_input_form():
         st.warning("Jalankan Clustering dulu sampai metode terbaik terpilih.")
         return
 
-    st.markdown("#### ⚙️ Pipeline yang digunakan untuk data baru")
+    st.markdown("#### ⚙️ Dengan Menggunakan :")
     st.markdown(f"- Metode optimal: **{best_method}** (k={best_k})")
-    st.markdown(f"- Missing strategy: **{missing_strategy}**")
     if drop_cols:
         st.markdown("- Drop kolom: " + " ".join([f"<span class='pill'>{c}</span>" for c in drop_cols]), unsafe_allow_html=True)
     if manual_maps:
@@ -1224,3 +1223,4 @@ st.markdown("""
     © 2025 — Klasterisasi (By Fahrurrohman Ibnu Irsad Argyanto)
 </div>
 """, unsafe_allow_html=True)
+
