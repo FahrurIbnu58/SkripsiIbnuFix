@@ -1,4 +1,5 @@
 import io
+import re
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -137,6 +138,10 @@ def plot_metric_curve(range_n_clusters, values, best_k, title, ylabel, color="bl
 def ensure_session_defaults():
     st.session_state.setdefault("df_raw", None)
     st.session_state.setdefault("sheet_name", None)
+    st.session_state.setdefault("uploaded_file_name", None)
+
+    # simpan bytes excel asli agar bisa ditulis ulang (opsional)
+    st.session_state.setdefault("uploaded_excel_bytes", None)
 
     st.session_state.setdefault("df_preprocessed", None)
     st.session_state.setdefault("df_scaled", None)
@@ -163,15 +168,15 @@ def ensure_session_defaults():
     st.session_state.setdefault("df_clustered", None)
     st.session_state.setdefault("cluster_summary_best", None)
 
-    st.session_state.setdefault("ahc_centroids", None)  # centroid pada space final yang dipakai (bisa subset)
-    st.session_state.setdefault("fcm_cntr", None)       # center pada space final yang dipakai (bisa subset)
+    st.session_state.setdefault("ahc_centroids", None)
+    st.session_state.setdefault("fcm_cntr", None)
 
     st.session_state.setdefault("data_fingerprint", None)
 
     # untuk prediksi data baru
     st.session_state.setdefault("best_use_entropy", False)
-    st.session_state.setdefault("best_selected_features", None)  # list fitur (jika entropy topN dipakai)
-    st.session_state.setdefault("best_model_cols", None)         # kolom yang jadi input model final (setelah scaling, sebelum/atau setelah weighting & subset)
+    st.session_state.setdefault("best_selected_features", None)
+    st.session_state.setdefault("best_model_cols", None)
     st.session_state.setdefault("best_is_fcm", None)
 
 ensure_session_defaults()
@@ -277,14 +282,53 @@ def build_manual_mapping_ui(df: pd.DataFrame, cat_cols: list) -> tuple[dict, lis
     return mapping_dict, errors
 
 # ======================================================
-# ✅ Fitur Baru: Pipeline untuk data baru (input form)
+# ✅ Util: tulis ulang Excel untuk di-download (setelah tambah data)
+# ======================================================
+def dataframe_to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Sheet1") -> bytes:
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        safe_sheet = sheet_name if sheet_name else "Sheet1"
+        df.to_excel(writer, index=False, sheet_name=safe_sheet)
+    out.seek(0)
+    return out.getvalue()
+
+# ======================================================
+# ✅ Util: parsing angka dari text_input (tanpa koma)
+# ======================================================
+SPECIAL_NUMERIC_KEYWORDS = ["lama usaha", "tahun", "kemitraan", "aset", "omzet", "jml naker", "jumlah naker", "naker"]
+
+def is_special_numeric_col(col_name: str) -> bool:
+    s = str(col_name).strip().lower()
+    return any(k in s for k in SPECIAL_NUMERIC_KEYWORDS)
+
+def parse_plain_number(text: str):
+    """
+    Mengharuskan input TANPA koma (,) dan pemisah ribuan lain.
+    - Jika ada koma => dianggap tidak valid.
+    - Mengizinkan desimal dengan titik (.) jika perlu.
+    """
+    if text is None:
+        return np.nan, "Kosong"
+    t = str(text).strip()
+    if t == "":
+        return np.nan, "Kosong"
+    if "," in t:
+        return None, "Input tidak boleh memakai koma (,). Masukkan angka polos tanpa pemisah ribuan."
+    # hilangkan spasi
+    t = t.replace(" ", "")
+    # validasi angka (int/float)
+    if not re.fullmatch(r"[-+]?\d+(\.\d+)?", t):
+        return None, "Format angka tidak valid. Contoh: 12000 atau 12000.5"
+    try:
+        v = float(t)
+        return v, None
+    except Exception:
+        return None, "Gagal membaca angka."
+
+# ======================================================
+# ✅ Pipeline untuk data baru (input form)
 # ======================================================
 def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd.DataFrame:
-    """
-    Untuk 1 baris data baru:
-    - Jika strategi 'Hapus baris yang ada NaN' => jika ada NaN, kembalikan df kosong.
-    - Mean/median/modus diambil dari df_preprocessed (dataset hasil preprocessing) jika tersedia.
-    """
     df_row = df_row.copy()
     if df_row.shape[0] != 1:
         return df_row
@@ -297,10 +341,8 @@ def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd
             return df_row.dropna(axis=0)
         return df_row
 
-    # referensi statistik dari dataset training yang sudah dipreprocess
     ref = st.session_state.get("df_preprocessed", None)
     if ref is None or ref.empty:
-        # fallback minimal
         if strategy == "Isi NaN dengan 0 (untuk numerik)":
             num_cols = df_row.select_dtypes(include=[np.number]).columns.tolist()
             df_row[num_cols] = df_row[num_cols].fillna(0)
@@ -315,23 +357,20 @@ def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd
         df_row[num_cols] = df_row[num_cols].fillna(0)
 
     elif strategy == "Isi NaN dengan mean (untuk numerik)":
-        num_cols = df_row.columns.tolist()
-        for c in num_cols:
+        for c in df_row.columns.tolist():
             if df_row[c].isna().any():
-                if pd.api.types.is_numeric_dtype(ref[c]) if c in ref.columns else False:
+                if (c in ref.columns) and pd.api.types.is_numeric_dtype(ref[c]):
                     df_row[c] = df_row[c].fillna(ref[c].mean())
                 else:
-                    # kalau bukan numeric, isi modus
                     try:
                         df_row[c] = df_row[c].fillna(ref[c].mode(dropna=True).iloc[0])
                     except Exception:
                         pass
 
     elif strategy == "Isi NaN dengan median (untuk numerik)":
-        num_cols = df_row.columns.tolist()
-        for c in num_cols:
+        for c in df_row.columns.tolist():
             if df_row[c].isna().any():
-                if pd.api.types.is_numeric_dtype(ref[c]) if c in ref.columns else False:
+                if (c in ref.columns) and pd.api.types.is_numeric_dtype(ref[c]):
                     df_row[c] = df_row[c].fillna(ref[c].median())
                 else:
                     try:
@@ -350,12 +389,6 @@ def apply_missing_strategy_single_row(df_row: pd.DataFrame, strategy: str) -> pd
     return df_row
 
 def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, list]:
-    """
-    Output:
-      - df_new_pre: 1-row dataframe setelah drop/missing/manual map
-      - df_new_scaled: 1-row dataframe setelah scaling (kolom numeric_cols_fit)
-      - warnings: list string
-    """
     warnings = []
     df_raw = st.session_state.get("df_raw", None)
     if df_raw is None:
@@ -399,7 +432,6 @@ def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, l
     # pastikan semua numeric_cols_fit ada
     for c in numeric_cols_fit:
         if c not in df_row.columns:
-            # jika kolom hilang (misal user kosongin), isi NaN dulu lalu missing handler lagi
             df_row[c] = np.nan
 
     # ubah ke numeric bila memungkinkan
@@ -417,68 +449,45 @@ def preprocess_new_input(raw_input: dict) -> tuple[pd.DataFrame, pd.DataFrame, l
 
     return df_row, df_scaled, warnings
 
-def explain_assignment_by_centroid(x: np.ndarray, centroids: np.ndarray, feature_names: list, top_k_reason: int = 5):
-    """
-    Alasan: cluster dipilih karena jarak terkecil.
-    Tambahkan fitur yang paling mendukung: fitur yang membuat x paling dekat dengan centroid cluster terpilih
-    dibanding rata-rata jarak ke centroid cluster lain.
-    """
-    # distances
-    dists = np.linalg.norm(centroids - x.reshape(1, -1), axis=1)
-    best_idx = int(np.argmin(dists))
-
-    # kontribusi per fitur (lebih informatif dibanding sekadar abs diff)
-    # score = (avg_absdiff_to_others) - (absdiff_to_best)
-    absdiff_best = np.abs(x - centroids[best_idx])
-    absdiff_others_avg = np.mean(np.abs(centroids - x.reshape(1, -1)), axis=0)
-    support = absdiff_others_avg - absdiff_best  # makin besar => makin mendukung cluster best
-
-    order = np.argsort(-support)  # descending
-    reasons = []
-    for i in order[:top_k_reason]:
-        reasons.append({
-            "Fitur": feature_names[i],
-            "Nilai(x)": float(x[i]),
-            "Centroid(cluster)": float(centroids[best_idx, i]),
-            "Selisih|x-centroid|": float(absdiff_best[i]),
-            "Skor Dukungan": float(support[i]),
-        })
-
-    return best_idx, dists, pd.DataFrame(reasons)
-
-def explain_assignment_by_fcm(x: np.ndarray, cntr: np.ndarray, feature_names: list, top_k_reason: int = 5):
-    """
-    Untuk FCM: hitung membership memakai cmeans_predict.
-    Alasan: membership terbesar.
-    Tambahkan alasan fitur: mirip centroid cluster terpilih, pakai logika support serupa.
-    """
+def explain_assignment_by_fcm(x: np.ndarray, cntr: np.ndarray):
     u, u0, d, jm, p, fpc = fuzz.cluster.cmeans_predict(
         x.reshape(-1, 1), cntr, m=2, error=0.005, maxiter=1000
     )
-    # u shape: (c, N=1)
     memberships = u[:, 0]
     best_idx = int(np.argmax(memberships))
+    return best_idx, memberships
 
-    absdiff_best = np.abs(x - cntr[best_idx])
-    absdiff_others_avg = np.mean(np.abs(cntr - x.reshape(1, -1)), axis=0)
-    support = absdiff_others_avg - absdiff_best
+def explain_assignment_by_centroid(x: np.ndarray, centroids: np.ndarray):
+    dists = np.linalg.norm(centroids - x.reshape(1, -1), axis=1)
+    best_idx = int(np.argmin(dists))
+    return best_idx, dists
 
-    order = np.argsort(-support)
-    reasons = []
-    for i in order[:top_k_reason]:
-        reasons.append({
-            "Fitur": feature_names[i],
-            "Nilai(x)": float(x[i]),
-            "Center(cluster)": float(cntr[best_idx, i]),
-            "Selisih|x-center|": float(absdiff_best[i]),
-            "Skor Dukungan": float(support[i]),
-        })
+def render_cluster_recap_for_selected(best_cluster_1based: int):
+    """
+    (Perbaikan #2) Ganti isi "Alasan..." -> tampilkan rekap seperti "Rekapitulasi Hasil Clustering (Metode Terpilih)"
+    untuk cluster terpilih.
+    """
+    cluster_summary = st.session_state.get("cluster_summary_best", None)
+    df_clustered = st.session_state.get("df_clustered", None)
 
-    return best_idx, memberships, pd.DataFrame(reasons)
+    if cluster_summary is None or df_clustered is None:
+        st.warning("Rekap cluster belum tersedia. Jalankan Clustering dulu sampai rekap muncul.")
+        return
 
-def render_new_input_form():
+    st.write("### 📌 Rekapitulasi Cluster Terpilih")
+    row = cluster_summary[cluster_summary["Cluster"] == best_cluster_1based]
+    if row.empty:
+        st.warning("Rekap untuk cluster ini tidak ditemukan.")
+    else:
+        st.dataframe(row, use_container_width=True)
+
+    st.write("### 📌 Jumlah Anggota Cluster Terpilih")
+    cnt = int((df_clustered["Cluster"] == best_cluster_1based).sum()) if "Cluster" in df_clustered.columns else 0
+    st.dataframe(pd.DataFrame({"Cluster": [best_cluster_1based], "Jumlah Data": [cnt]}), use_container_width=True)
+
+def render_new_input_form_and_append_excel():
     st.markdown("### 🧾 Tambah Data")
-    st.caption("Isi data sesuai kolom Excel. Kolom yang dulu di-drop akan diabaikan otomatis. Kolom kategorikal akan muncul sebagai pilihan label.")
+    st.caption("Isi data sesuai kolom Excel. Setelah diproses, data baru akan ditambahkan ke Excel awal dan bisa di-download lagi.")
 
     df_raw = st.session_state.get("df_raw", None)
     if df_raw is None:
@@ -487,7 +496,6 @@ def render_new_input_form():
 
     manual_maps = st.session_state.get("manual_maps", {})
     drop_cols = st.session_state.get("drop_cols", [])
-    missing_strategy = st.session_state.get("missing_strategy", "")
 
     best_method = st.session_state.get("best_method", None)
     best_k = st.session_state.get("best_k", None)
@@ -504,43 +512,75 @@ def render_new_input_form():
 
     # buat form input
     with st.form("form_input_data_baru"):
-        raw_input = {}
-        cols = df_raw.columns.tolist()
+        raw_input_display = {}  # nilai untuk disimpan ke excel (label tetap label, angka float)
+        raw_input_for_pipeline = {}  # nilai untuk pipeline (label tetap label juga; mapping dilakukan di preprocess_new_input)
 
-        # tampilkan 2 kolom layout biar rapi
+        cols = df_raw.columns.tolist()
         col_left, col_right = st.columns(2)
+
+        special_errors = []
+
         for idx, c in enumerate(cols):
             target_col = col_left if idx % 2 == 0 else col_right
-
             with target_col:
-                # jika kolom di-drop, tetap tampilkan tapi kasih note bahwa akan diabaikan (opsional)
                 ignored = c in drop_cols
-                label = f"{c} (akan diabaikan)" if ignored else c
+                label = f"{c} (akan diabaikan saat clustering)" if ignored else c
 
-                # kalau kolom ini termasuk yang punya mapping, tampilkan selectbox label
+                # kalau kolom mapping, selectbox label (biar konsisten dgn mapping)
                 if c in manual_maps:
-                    # opsi label dari data asli (stabil dari mapping)
                     options = list(manual_maps[c].keys())
-                    # default pilihan pertama
                     pick = st.selectbox(label, options=options, index=0, key=f"new_{c}")
-                    raw_input[c] = pick
+                    raw_input_display[c] = pick
+                    raw_input_for_pipeline[c] = pick
                 else:
-                    # tipe input: numeric jika kolom numeric di excel, else text
-                    if pd.api.types.is_numeric_dtype(df_raw[c]):
-                        val = st.number_input(label, value=float(df_raw[c].dropna().median()) if df_raw[c].dropna().shape[0] else 0.0, key=f"new_{c}")
-                        raw_input[c] = val
+                    # (Perbaikan #3) kolom tertentu pakai text_input angka polos tanpa koma
+                    if pd.api.types.is_numeric_dtype(df_raw[c]) and is_special_numeric_col(c):
+                        txt = st.text_input(
+                            label,
+                            value="",
+                            placeholder="Masukkan angka tanpa koma, contoh: 12000",
+                            key=f"newtxt_{c}"
+                        )
+                        val, err = parse_plain_number(txt)
+                        if err is None:
+                            raw_input_display[c] = val
+                            raw_input_for_pipeline[c] = val
+                        else:
+                            # kosong -> NaN (biar ikut strategi missing)
+                            if txt.strip() == "":
+                                raw_input_display[c] = np.nan
+                                raw_input_for_pipeline[c] = np.nan
+                            else:
+                                raw_input_display[c] = np.nan
+                                raw_input_for_pipeline[c] = np.nan
+                                special_errors.append(f"Kolom '{c}': {err}")
                     else:
-                        val = st.text_input(label, value=str(df_raw[c].dropna().iloc[0]) if df_raw[c].dropna().shape[0] else "", key=f"new_{c}")
-                        # kosong => NaN
-                        raw_input[c] = val if val.strip() != "" else np.nan
+                        # default: numeric -> number_input, text -> text_input
+                        if pd.api.types.is_numeric_dtype(df_raw[c]):
+                            default_val = float(df_raw[c].dropna().median()) if df_raw[c].dropna().shape[0] else 0.0
+                            val = st.number_input(label, value=default_val, key=f"new_{c}")
+                            raw_input_display[c] = float(val)
+                            raw_input_for_pipeline[c] = float(val)
+                        else:
+                            default_txt = str(df_raw[c].dropna().iloc[0]) if df_raw[c].dropna().shape[0] else ""
+                            val = st.text_input(label, value=default_txt, key=f"new_{c}")
+                            raw_input_display[c] = val if val.strip() != "" else np.nan
+                            raw_input_for_pipeline[c] = val if val.strip() != "" else np.nan
 
-        submitted = st.form_submit_button("🔍 Proses & Tentukan Cluster")
+        submitted = st.form_submit_button("➕ Tambah & Tentukan Cluster")
 
     if not submitted:
         return
 
-    # preprocess data baru
-    df_new_pre, df_new_scaled, warns = preprocess_new_input(raw_input)
+    if special_errors:
+        st.error("❌ Ada input angka yang tidak valid:")
+        for e in special_errors:
+            st.write("- " + e)
+        st.info("Perbaiki input angka (tanpa koma) lalu submit ulang.")
+        return
+
+    # preprocess data baru untuk prediksi cluster
+    df_new_pre, df_new_scaled, warns = preprocess_new_input(raw_input_for_pipeline)
     if warns:
         for w in warns:
             st.warning("⚠️ " + w)
@@ -557,7 +597,7 @@ def render_new_input_form():
 
     # siapkan space model final
     best_use_entropy = st.session_state.get("best_use_entropy", False)
-    best_model_cols = st.session_state.get("best_model_cols", None)  # kolom final
+    best_model_cols = st.session_state.get("best_model_cols", None)
     weights_entropy = st.session_state.get("weights_entropy", None)
     feature_ranking = st.session_state.get("feature_ranking", None)
     best_selected_features = st.session_state.get("best_selected_features", None)
@@ -566,27 +606,21 @@ def render_new_input_form():
         st.error("Model final belum menyimpan informasi kolom. Jalankan clustering ulang.")
         return
 
-    # ambil fitur numeric sesuai scaler, lalu transform ke space entropy/subset jika dibutuhkan
     x_space = df_new_scaled.copy()
 
-    # jika entropy dipakai, kalikan bobot pada kolom scaler-fit
     if best_use_entropy:
         if weights_entropy is None or feature_ranking is None:
             st.error("Entropy weighting belum tersedia.")
             return
-        # weights_entropy sesuai urutan kolom df_scaled training
-        # df_new_scaled kolomnya = numeric_cols_fit training, sama urutan
         w = np.array(weights_entropy, dtype=float)
         x_weighted = x_space.values * w.reshape(1, -1)
         x_weighted_df = pd.DataFrame(x_weighted, columns=x_space.columns)
 
-        # kalau skenario entropy top-N, ambil fitur terpilih
         if best_selected_features is not None:
             x_final_df = x_weighted_df[best_selected_features].copy()
         else:
             x_final_df = x_weighted_df.copy()
     else:
-        # tanpa entropy: pakai semua fitur numeric
         x_final_df = x_space.copy()
 
     # pastikan kolom sama dengan model final
@@ -601,8 +635,8 @@ def render_new_input_form():
     x_final_df = x_final_df[best_model_cols]
     x = x_final_df.values[0]
 
-    st.markdown("#### 🧠 Representasi final yang dipakai model (space input clustering)")
-    st.dataframe(x_final_df, use_container_width=True)
+    # (Perbaikan #1) HAPUS tampilan "Representasi final yang dipakai model (space input clustering)"
+    # st.dataframe(x_final_df, ... ) -> dihapus
 
     # prediksi cluster
     best_is_fcm = st.session_state.get("best_is_fcm", None)
@@ -618,9 +652,7 @@ def render_new_input_form():
             st.error("Center FCM belum tersedia. Pastikan metode terbaik adalah FCM dan clustering sudah dijalankan.")
             return
 
-        best_idx, memberships, reasons_df = explain_assignment_by_fcm(
-            x=x, cntr=cntr, feature_names=best_model_cols, top_k_reason=5
-        )
+        best_idx, memberships = explain_assignment_by_fcm(x=x, cntr=cntr)
 
         st.success(f"✅ Data baru masuk ke **Cluster {best_idx + 1}** (berdasarkan membership tertinggi).")
         st.write("**Membership tiap cluster:**")
@@ -630,8 +662,8 @@ def render_new_input_form():
         }).sort_values("Membership", ascending=False)
         st.dataframe(mem_df, use_container_width=True)
 
-        st.write("**Alasan (fitur yang paling mendukung cluster terpilih):**")
-        st.dataframe(reasons_df, use_container_width=True)
+        # (Perbaikan #2) ganti alasan -> tampilkan rekap cluster terpilih
+        render_cluster_recap_for_selected(best_cluster_1based=best_idx + 1)
 
     else:
         centroids = st.session_state.get("ahc_centroids", None)
@@ -639,9 +671,7 @@ def render_new_input_form():
             st.error("Centroid AHC belum tersedia. Pastikan metode terbaik adalah AHC dan clustering sudah dijalankan.")
             return
 
-        best_idx, dists, reasons_df = explain_assignment_by_centroid(
-            x=x, centroids=centroids, feature_names=best_model_cols, top_k_reason=5
-        )
+        best_idx, dists = explain_assignment_by_centroid(x=x, centroids=centroids)
 
         st.success(f"✅ Data baru masuk ke **Cluster {best_idx + 1}** (jarak ke centroid paling kecil).")
         dist_df = pd.DataFrame({
@@ -651,16 +681,52 @@ def render_new_input_form():
         st.write("**Jarak ke centroid tiap cluster:**")
         st.dataframe(dist_df, use_container_width=True)
 
-        st.write("**Alasan (fitur yang paling mendukung cluster terpilih):**")
-        st.dataframe(reasons_df, use_container_width=True)
+        # (Perbaikan #2) ganti alasan -> tampilkan rekap cluster terpilih
+        render_cluster_recap_for_selected(best_cluster_1based=best_idx + 1)
+
+    # ======================================================
+    # (Perbaikan #5) Tambahkan data baru ke df_raw, lalu sediakan download Excel terbaru
+    # ======================================================
+    st.markdown("---")
+    st.subheader("📥 Update Excel (Tambah 1 Baris)")
+
+    # pastikan urutan kolom sama persis dengan excel awal
+    df_raw_current = st.session_state["df_raw"].copy()
+    new_row = {c: raw_input_display.get(c, np.nan) for c in df_raw_current.columns}
+    df_raw_updated = pd.concat([df_raw_current, pd.DataFrame([new_row])], ignore_index=True)
+
+    # simpan ke session (biar bila user balik ke Description, sudah bertambah)
+    st.session_state["df_raw"] = df_raw_updated
+
+    # Buat bytes excel untuk didownload
+    sheet_name = st.session_state.get("sheet_name", "Sheet1")
+    updated_bytes = dataframe_to_excel_bytes(df_raw_updated, sheet_name=sheet_name)
+
+    # nama file download
+    base_name = st.session_state.get("uploaded_file_name") or "dataset"
+    if base_name.lower().endswith(".xlsx"):
+        out_name = base_name.replace(".xlsx", "_updated.xlsx")
+    elif base_name.lower().endswith(".xls"):
+        out_name = base_name.replace(".xls", "_updated.xlsx")
+    else:
+        out_name = f"{base_name}_updated.xlsx"
+
+    st.success("✅ Data baru sudah ditambahkan ke dataset (di memori aplikasi). Silakan download Excel terbaru di bawah.")
+    st.download_button(
+        "📥 Download Excel Terbaru (dengan data baru)",
+        data=updated_bytes,
+        file_name=out_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 # ======================================================
 # Menu Navigasi
+# (Perbaikan #4) Pindah fitur tambah data baru jadi menu navigasi
 # ======================================================
 selected = option_menu(
     menu_title=None,
-    options=["Description", "Preprocessing", "Entropy Weighting", "Clustering"],
-    icons=["info-circle", "tools", "activity", "diagram-3"],
+    options=["Description", "Preprocessing", "Entropy Weighting", "Clustering", "Tambah Data"],
+    icons=["info-circle", "tools", "activity", "diagram-3", "plus-circle"],
     default_index=0,
     orientation="horizontal",
     styles={
@@ -687,6 +753,10 @@ with st.sidebar:
 
     if uploaded is not None:
         try:
+            # simpan nama & bytes
+            st.session_state["uploaded_file_name"] = uploaded.name
+            st.session_state["uploaded_excel_bytes"] = uploaded.getvalue()
+
             xls = pd.ExcelFile(uploaded)
             sheet_names = xls.sheet_names
             sheet = st.selectbox("Pilih sheet", sheet_names, index=0)
@@ -911,7 +981,7 @@ if selected == "Preprocessing":
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ======================================================
-# Entropy Weighting (sesuai contoh + heatmap)
+# Entropy Weighting
 # ======================================================
 if selected == "Entropy Weighting":
     with st.container():
@@ -1189,6 +1259,7 @@ if selected == "Clustering":
 
             st.subheader("📥 Download Hasil Clustering")
             st.session_state["df_clustered"] = df_hasil
+            st.session_state["cluster_summary_best"] = cluster_summary  # simpan untuk dipakai di menu Tambah Data
             st.dataframe(df_hasil, use_container_width=True)
 
             csv_hasil = df_hasil.to_csv(index=False).encode("utf-8")
@@ -1208,9 +1279,24 @@ if selected == "Clustering":
                 st.session_state["fcm_cntr"] = cntr_best
                 st.session_state["ahc_centroids"] = None
 
-        # ✅ Fitur Baru: input data baru + prediksi cluster + alasan
-        st.markdown("---")
-        render_new_input_form()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# ======================================================
+# (Perbaikan #4) Menu khusus Tambah Data
+# ======================================================
+if selected == "Tambah Data":
+    with st.container():
+        st.markdown("<div class='stCard'>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>➕ TAMBAH DATA BARU</h2>", unsafe_allow_html=True)
+
+        if st.session_state.get("df_raw") is None:
+            st.warning("⚠️ Silakan upload dataset Excel di sidebar dulu.")
+        elif not st.session_state.get("status_preprocess_ok", False):
+            st.warning("⚠️ Jalankan Preprocessing dulu (agar scaler & mapping siap).")
+        elif st.session_state.get("best_method") is None:
+            st.warning("⚠️ Jalankan Clustering dulu sampai metode terbaik terpilih.")
+        else:
+            render_new_input_form_and_append_excel()
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1223,4 +1309,3 @@ st.markdown("""
     © 2025 — Klasterisasi (By Fahrurrohman Ibnu Irsad Argyanto)
 </div>
 """, unsafe_allow_html=True)
-
